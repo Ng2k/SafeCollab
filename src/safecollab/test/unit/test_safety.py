@@ -1,4 +1,5 @@
 """TDD spec for safecollab.safety_logic.classify (zone classifier, FR-9 fail-safe)."""
+
 import pytest
 
 from safecollab.safety_logic import classify
@@ -15,12 +16,14 @@ def _classify(d):
 
 # --- fail-safe -------------------------------------------------------------
 
+
 def test_none_distance_is_lost_and_stops():
     # FR-9: perception lost/stale -> fail-safe stop.
     assert _classify(None) == ("lost", 0.0)
 
 
 # --- green zone ------------------------------------------------------------
+
 
 def test_far_is_green_full_speed():
     zone, scale = _classify(1.5)
@@ -37,6 +40,7 @@ def test_yellow_edge_is_exclusive_equal_yellow_is_green():
 
 # --- red zone --------------------------------------------------------------
 
+
 def test_close_is_red_protective_stop():
     zone, scale = _classify(0.1)
     assert zone == "red"
@@ -51,6 +55,7 @@ def test_red_edge_is_inclusive_equal_red_is_red():
 
 
 # --- yellow zone / ramp ----------------------------------------------------
+
 
 def test_yellow_midpoint_ramps_linearly():
     # Midway between the thresholds -> midway on the [s_min, 1.0] ramp.

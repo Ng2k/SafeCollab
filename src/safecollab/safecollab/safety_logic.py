@@ -24,10 +24,10 @@ def classify(d, *, d_red, d_yellow, s_min):
     red edge INCLUSIVE (``d == d_red`` -> red), ``d is None`` -> fail-safe stop.
     """
     if d is None:
-        return "lost", 0.0          # fail-safe (FR-9)
+        return "lost", 0.0  # fail-safe (FR-9)
     if d >= d_yellow:
         return "green", 1.0
     if d <= d_red:
-        return "red", 0.0          # red edge INCLUSIVE (d == d_red -> red)
+        return "red", 0.0  # red edge INCLUSIVE (d == d_red -> red)
     s = s_min + (1 - s_min) * (d - d_red) / (d_yellow - d_red)
     return "yellow", s

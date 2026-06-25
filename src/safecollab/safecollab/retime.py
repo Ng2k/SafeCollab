@@ -26,5 +26,5 @@ def retime(times, scale):
     if not 0.0 <= scale <= 1.0:
         raise ValueError(f"scale must be in [0.0, 1.0], got {scale!r}")
     if scale == 0.0:
-        return None                      # protective stop -- guard div-by-zero
+        return None  # protective stop -- guard div-by-zero
     return [t / scale for t in times]

@@ -4,6 +4,7 @@ retime() rescales speed by STRETCHING the time_from_start of each trajectory
 point by 1/scale. scale == 0.0 is a protective stop and must be guarded (no
 division by zero).
 """
+
 import pytest
 
 from safecollab.retime import retime

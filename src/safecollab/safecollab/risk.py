@@ -4,6 +4,7 @@ Pure functions, no ROS. The model inputs live in ``config/risk.yaml`` and the
 zone thresholds are computed at start-up -- no thresholds are hard-coded here
 (AGENTS.md ground rule 5).
 """
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +20,7 @@ def protective_distance(v_h, t_r, t_s, v_r, s_s, c, z_d, z_r):
     """
     s_h = v_h * (t_r + t_s)
     s_r = v_r * t_r
-    return s_h + s_r + s_s + c + z_d + z_r            # ISO/TS 15066 S_p
+    return s_h + s_r + s_s + c + z_d + z_r  # ISO/TS 15066 S_p
 
 
 def thresholds(cfg, z_d):
@@ -30,12 +31,26 @@ def thresholds(cfg, z_d):
     The two scenarios share the cell/sensor properties and differ only in the
     robot speed ``v_r`` and stop time ``t_s`` (which shrink together).
     """
-    d_yellow = protective_distance(v_r=cfg.full_speed.v_r, t_s=cfg.full_speed.t_s,
-                                   v_h=cfg.v_h, t_r=cfg.t_r, s_s=cfg.s_s, c=cfg.c,
-                                   z_d=z_d, z_r=cfg.z_r)
-    d_red = protective_distance(v_r=cfg.reduced.v_r, t_s=cfg.reduced.t_s,
-                                v_h=cfg.v_h, t_r=cfg.t_r, s_s=cfg.s_s, c=cfg.c,
-                                z_d=z_d, z_r=cfg.z_r)
+    d_yellow = protective_distance(
+        v_r=cfg.full_speed.v_r,
+        t_s=cfg.full_speed.t_s,
+        v_h=cfg.v_h,
+        t_r=cfg.t_r,
+        s_s=cfg.s_s,
+        c=cfg.c,
+        z_d=z_d,
+        z_r=cfg.z_r,
+    )
+    d_red = protective_distance(
+        v_r=cfg.reduced.v_r,
+        t_s=cfg.reduced.t_s,
+        v_h=cfg.v_h,
+        t_r=cfg.t_r,
+        s_s=cfg.s_s,
+        c=cfg.c,
+        z_d=z_d,
+        z_r=cfg.z_r,
+    )
     return round(d_red, 2), round(d_yellow, 2)
 
 

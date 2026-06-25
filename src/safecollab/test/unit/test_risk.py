@@ -2,6 +2,7 @@
 
 Thresholds must be DERIVED from config/risk.yaml at runtime, never hard-coded.
 """
+
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ RISK_YAML = Path(__file__).resolve().parents[2] / "config" / "risk.yaml"
 
 
 # --- the S_p formula itself ------------------------------------------------
+
 
 def test_protective_distance_sums_iso_terms():
     # S_p = S_H + S_R + S_S + C + Z_d + Z_r
@@ -34,6 +36,7 @@ def test_protective_distance_each_term_adds_distance():
 
 # --- the worked example (AGENTS.md  4) -------------------------------------
 
+
 def test_worked_example_thresholds_from_yaml():
     cfg = load_config(RISK_YAML)
     d_red, d_yellow = thresholds(cfg, z_d=0.05)
@@ -55,6 +58,7 @@ def test_red_threshold_is_below_yellow():
 
 
 # --- property: more operator uncertainty widens BOTH zones ------------------
+
 
 def test_raising_z_d_widens_both_thresholds():
     cfg = load_config(RISK_YAML)
