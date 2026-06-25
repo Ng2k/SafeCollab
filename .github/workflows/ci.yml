@@ -1,0 +1,197 @@
+# SafeCollab CI/CD — six gated stages (AGENTS.md §7):
+#   lint -> build -> unit(+coverage) -> integration -> package -> deliver
+#
+# Stages that need application code (unit coverage gate, integration bring-up,
+# headless launch smoke) are *wired and ready*: they self-skip with a clear
+# message until the owning streams land the modules, so main stays green while
+# the pipeline is complete. `deliver` publishes a GitHub Release on this repo
+# (never an external registry) only on a vX.Y.Z tag.
+---
+name: CI
+
+"on":
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+
+# One run per ref; cancel superseded runs on a branch (never cancel tag runs).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  ROS_DISTRO: jazzy
+  SAFETY_MODULE: src/safecollab/safecollab/safety_logic.py
+  CELL_LAUNCH: src/safecollab/launch/cell.launch.py
+
+jobs:
+  # 1) LINT — ruff (lint+format) and yamllint. ament_lint runs via colcon test
+  #    once the package ships its ament lint hooks (Stream A/B).
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install linters
+        run: pip install "ruff==0.8.6" "yamllint==1.35.1"
+      - name: ruff (lint)
+        run: ruff check .
+      - name: ruff (format check)
+        run: ruff format --check .
+      - name: yamllint
+        run: |
+          yamllint -d "{extends: default, rules: {line-length: {max: 120}, \
+            document-start: disable, truthy: {check-keys: false}, \
+            comments: {min-spaces-from-content: 1}}}" .
+
+  # 2) BUILD — colcon build --symlink-install from scratch (AGENTS.md §7.2).
+  build:
+    needs: [lint]
+    runs-on: ubuntu-latest
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: colcon build (from scratch)
+        shell: bash
+        run: |
+          source /opt/ros/${ROS_DISTRO}/setup.bash
+          colcon build --symlink-install
+      - name: Upload build/install overlay
+        uses: actions/upload-artifact@v4
+        with:
+          name: colcon-overlay
+          path: |
+            build/
+            install/
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # 3) UNIT (+coverage gate) — pytest --cov=safecollab --cov-fail-under=90 on
+  #    the safety & risk modules (AGENTS.md §2, §7.3). Self-skips until Stream B.
+  unit:
+    needs: [build]
+    runs-on: ubuntu-latest
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: pytest + coverage gate (>= 90% on safety & risk)
+        shell: bash
+        run: |
+          if [ ! -f "${SAFETY_MODULE}" ] && [ ! -f "src/safecollab/safecollab/risk.py" ]; then
+            echo "::notice::safety/risk modules not present yet — unit+coverage"\
+                 " gate is wired and will enforce >= 90% once Stream B lands."
+            exit 0
+          fi
+          apt-get update && apt-get install -y --no-install-recommends \
+            python3-pytest python3-pytest-cov
+          source /opt/ros/${ROS_DISTRO}/setup.bash
+          colcon build --symlink-install
+          source install/setup.bash
+          pytest src/safecollab/test/unit \
+            --cov=safecollab --cov-report=term-missing --cov-fail-under=90
+
+  # 4) INTEGRATION — headless launch_testing bring-up (AGENTS.md §7.4, §9).
+  #    Self-skips until cell.launch.py exists (Stream A).
+  integration:
+    needs: [unit]
+    runs-on: ubuntu-latest
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: launch_test (headless)
+        shell: bash
+        run: |
+          if [ ! -f "${CELL_LAUNCH}" ]; then
+            echo "::notice::cell.launch.py not present yet — headless integration"\
+                 " harness is wired and ready (Stream A)."
+            exit 0
+          fi
+          apt-get update && apt-get install -y --no-install-recommends \
+            ros-${ROS_DISTRO}-launch-testing \
+            ros-${ROS_DISTRO}-launch-testing-ros
+          source /opt/ros/${ROS_DISTRO}/setup.bash
+          colcon build --symlink-install
+          source install/setup.bash
+          launch_test src/safecollab/test/integration/test_bringup.py
+
+  # 5) PACKAGE — build the deploy image; verify it launches headless (§7.5).
+  package:
+    needs: [integration]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the container image
+        run: docker build -t safecollab:ci .
+      - name: Smoke test — ROS env sources inside the image
+        run: docker run --rm safecollab:ci ros2 pkg list >/dev/null
+      - name: Smoke test — headless cell launch (when present)
+        run: |
+          if [ -f "${CELL_LAUNCH}" ]; then
+            timeout 60 docker run --rm safecollab:ci \
+              ros2 launch safecollab cell.launch.py headless:=true || code=$?
+            # 124 = timeout reached = cell came up and kept running (success).
+            if [ "${code:-0}" -ne 0 ] && [ "${code:-0}" -ne 124 ]; then
+              echo "::error::headless cell launch failed (exit ${code})"; exit 1
+            fi
+            echo "headless cell launch OK"
+          else
+            echo "::notice::cell.launch.py not present yet — headless launch"\
+                 " smoke is wired and ready (Stream A)."
+          fi
+
+  # 6) DELIVER — build the image artifact; on a vX.Y.Z tag, save it as a
+  #    .tar.gz and publish it as a GitHub Release ON THIS REPO with the
+  #    per-version changelog as notes (AGENTS.md §7.6, §7a). No external registry.
+  deliver:
+    needs: [lint, build, unit, integration, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # required to create a Release on this repo
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve image tag
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build the container image (the deploy artifact)
+        run: docker build -t safecollab:${{ steps.meta.outputs.tag }} .
+      - name: Save image as a portable tarball
+        run: |
+          docker save safecollab:${{ steps.meta.outputs.tag }} \
+            | gzip > safecollab-${{ steps.meta.outputs.tag }}.tar.gz
+      - name: Upload tarball as a workflow artifact (every run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: safecollab-image-${{ steps.meta.outputs.tag }}
+          path: safecollab-${{ steps.meta.outputs.tag }}.tar.gz
+          retention-days: 14
+      - name: Slice the changelog for this version (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Match section headers literally (index()) — robust across awk variants.
+          awk -v hdr="## [${version}]" '
+            index($0, hdr) == 1                  { grab = 1; print; next }
+            grab && index($0, "## [") == 1       { exit }
+            grab && index($0, "## Planned") == 1 { exit }
+            grab                                 { print }
+          ' CHANGELOG.md > "CHANGELOG-${GITHUB_REF_NAME}.md"
+          if [ ! -s "CHANGELOG-${GITHUB_REF_NAME}.md" ]; then
+            echo "Release ${GITHUB_REF_NAME}" > "CHANGELOG-${GITHUB_REF_NAME}.md"
+          fi
+          echo "----- release notes -----"
+          cat "CHANGELOG-${GITHUB_REF_NAME}.md"
+      - name: Publish artifact ON THIS REPO (only on a version tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: safecollab-${{ github.ref_name }}.tar.gz
+          body_path: CHANGELOG-${{ github.ref_name }}.md
