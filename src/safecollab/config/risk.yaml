@@ -18,7 +18,7 @@ risk:
   v_h: 1.6      # operator approach speed (m/s) — same in both scenarios
   t_r: 0.10     # system reaction time (s) — same in both scenarios
   s_s: 0.06     # robot stopping distance contribution (m) — same in both scenarios
-  c:   0.10     # intrusion distance (m) — same in both scenarios
+  c: 0.10       # intrusion distance (m) — same in both scenarios
   z_r: 0.02     # robot position uncertainty (m) — same in both scenarios
   full_speed:
     v_r: 0.50   # robot TCP speed at full speed (m/s)
@@ -26,4 +26,4 @@ risk:
   reduced:
     v_r: 0.10   # robot TCP speed once already in the yellow band (m/s)
     t_s: 0.02   # robot stop time at reduced speed (s) — shrinks with speed
-  # z_d (operator uncertainty) is supplied live by perception
+#   z_d (operator uncertainty) is supplied live by perception
