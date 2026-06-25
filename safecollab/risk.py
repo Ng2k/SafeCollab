@@ -27,24 +27,34 @@ def thresholds(cfg, z_d):
 
     ``z_d`` (operator position uncertainty) comes from perception, so the
     thresholds widen as the perceived operator position becomes less certain.
+    The two scenarios share the cell/sensor properties and differ only in the
+    robot speed ``v_r`` and stop time ``t_s`` (which shrink together).
     """
-    d_yellow = protective_distance(v_r=cfg.v_r, z_d=z_d, **cfg.full_speed)
-    d_red = protective_distance(v_r=cfg.v_r * cfg.yellow_frac, z_d=z_d, **cfg.reduced)
+    d_yellow = protective_distance(v_r=cfg.full_speed.v_r, t_s=cfg.full_speed.t_s,
+                                   v_h=cfg.v_h, t_r=cfg.t_r, s_s=cfg.s_s, c=cfg.c,
+                                   z_d=z_d, z_r=cfg.z_r)
+    d_red = protective_distance(v_r=cfg.reduced.v_r, t_s=cfg.reduced.t_s,
+                                v_h=cfg.v_h, t_r=cfg.t_r, s_s=cfg.s_s, c=cfg.c,
+                                z_d=z_d, z_r=cfg.z_r)
     return round(d_red, 2), round(d_yellow, 2)
 
 
 def load_config(path):
     """Load the ``risk:`` block of ``config/risk.yaml`` into a namespace.
 
-    Returns an object exposing ``v_r``, ``yellow_frac`` and the ``full_speed`` /
-    ``reduced`` keyword dicts consumed by :func:`thresholds`.
+    Returns an object exposing the shared inputs (``v_h``, ``t_r``, ``s_s``,
+    ``c``, ``z_r``) plus ``full_speed`` / ``reduced`` sub-namespaces, each with
+    its own ``v_r`` and ``t_s``, as consumed by :func:`thresholds`.
     """
     with open(Path(path), "r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle)
     risk = data["risk"]
     return SimpleNamespace(
-        v_r=risk["v_r"],
-        yellow_frac=risk["yellow_frac"],
-        full_speed=risk["full_speed"],
-        reduced=risk["reduced"],
+        v_h=risk["v_h"],
+        t_r=risk["t_r"],
+        s_s=risk["s_s"],
+        c=risk["c"],
+        z_r=risk["z_r"],
+        full_speed=SimpleNamespace(**risk["full_speed"]),
+        reduced=SimpleNamespace(**risk["reduced"]),
     )

@@ -37,8 +37,8 @@ def test_protective_distance_each_term_adds_distance():
 def test_worked_example_thresholds_from_yaml():
     cfg = load_config(RISK_YAML)
     d_red, d_yellow = thresholds(cfg, z_d=0.05)
-    assert d_yellow == pytest.approx(0.85, abs=1e-9)
-    assert d_red == pytest.approx(0.35, abs=1e-9)
+    assert d_yellow == pytest.approx(0.84, abs=1e-9)
+    assert d_red == pytest.approx(0.43, abs=1e-9)
 
 
 def test_thresholds_are_rounded_to_centimetres():
