@@ -1,0 +1,27 @@
+# Root requirements.txt — every worktree creates its own .venv from this file
+# (AGENTS.md ground rule 9). Never pip-install into the system/global Python.
+#
+#   python -m venv .venv
+#   .venv\Scripts\activate        (Windows)   /   source .venv/bin/activate  (Linux/macOS)
+#   python -m pip install -r requirements.txt
+#
+# Add anything a stream needs here, in its own PR — not as an ad hoc local install.
+
+# Testing (Stream B, all streams)
+pytest>=8.0
+pytest-cov>=5.0
+
+# Lint / format (Stream G, pre-commit)
+ruff>=0.6
+yamllint>=1.35
+
+# Config & data
+pyyaml>=6.0
+
+# Perception (Stream C)
+opencv-python>=4.9
+numpy>=1.26
+
+# ROS-side packages (rclpy, tf2, launch_testing, etc.) are provided by the
+# ros:jazzy-ros-base image / apt (see Dockerfile, §8) and are NOT pip-installed —
+# they are not portable across platforms via pip and must match the ROS distro.

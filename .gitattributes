@@ -1,0 +1,39 @@
+# .gitattributes — normalises line endings repo-wide so every worktree (Windows or
+# Linux) checks out the same bytes. Fixes the CRLF/LF churn pre-commit otherwise
+# re-fixes on every new stream (see Stream G's note on entrypoint.sh, and the
+# LICENSE/README fixes from Stream G's pre-commit run).
+
+# Default: normalise everything to LF in the repo, let git convert on checkout
+# only if the platform truly needs it (most tools/editors today are LF-clean).
+* text=auto eol=lf
+
+# Shell scripts: ALWAYS LF, no exceptions — a CRLF shebang line breaks the
+# Linux container immediately ("/bin/bash^M: bad interpreter").
+*.sh text eol=lf
+
+# Python, YAML, launch files, Dockerfile: always LF (consumed inside Linux containers).
+*.py  text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+
+# ROS / robotics text formats: always LF.
+*.xacro text eol=lf
+*.urdf  text eol=lf
+*.sdf   text eol=lf
+*.rviz  text eol=lf
+*.launch.py text eol=lf
+
+# Markdown / docs: LF (still text, just for humans).
+*.md text eol=lf
+LICENSE text eol=lf
+
+# Binary / generated artifacts: never touch, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.tar.gz binary
+*.docx binary
+*.pdf binary
