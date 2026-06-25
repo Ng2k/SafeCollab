@@ -1,0 +1,29 @@
+# Inputs to the ISO/TS 15066 protective-separation model (S_p).
+# Thresholds are COMPUTED from these at start-up (safecollab/risk.py); never
+# paste the resulting d_red / d_yellow back into code (AGENTS.md ground rule 5).
+#
+#   S_p = S_H + S_R + S_S + C + Z_d + Z_r
+#       = v_h*(t_r+t_s) + v_r*t_r + s_s + c + z_d + z_r
+#
+# The two scenarios share the cell/sensor properties (v_h, t_r, s_s, c, z_r)
+# but each has its own v_r AND t_s: a robot at reduced speed has less kinetic
+# energy and genuinely stops faster, so t_s shrinks together with v_r (not two
+# independent free parameters). z_d (operator uncertainty) is supplied live by
+# perception, so it is not stored here.
+#
+# Worked example (test_risk.py target): with z_d = 0.05
+#   d_yellow = 1.6*(0.10+0.25) + 0.50*0.10 + 0.06 + 0.10 + 0.05 + 0.02 = 0.84 m
+#   d_red    = 1.6*(0.10+0.02) + 0.10*0.10 + 0.06 + 0.10 + 0.05 + 0.02 = 0.43 m
+risk:
+  v_h: 1.6      # operator approach speed (m/s) — same in both scenarios
+  t_r: 0.10     # system reaction time (s) — same in both scenarios
+  s_s: 0.06     # robot stopping distance contribution (m) — same in both scenarios
+  c:   0.10     # intrusion distance (m) — same in both scenarios
+  z_r: 0.02     # robot position uncertainty (m) — same in both scenarios
+  full_speed:
+    v_r: 0.50   # robot TCP speed at full speed (m/s)
+    t_s: 0.25   # robot stop time at full speed (s)
+  reduced:
+    v_r: 0.10   # robot TCP speed once already in the yellow band (m/s)
+    t_s: 0.02   # robot stop time at reduced speed (s) — shrinks with speed
+  # z_d (operator uncertainty) is supplied live by perception
