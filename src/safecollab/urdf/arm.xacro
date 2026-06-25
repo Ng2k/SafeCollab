@@ -1,0 +1,160 @@
+<?xml version="1.0"?>
+<!-- arm.xacro - SafeCollab 6-DOF kitting arm (Stream A).
+     Mirrors the SR26_08 ros2_control / gz_ros2_control pattern:
+       * a serial revolute chain driven by joint_trajectory_controller
+       * a <ros2_control> block exposing position command + position/velocity
+         state interfaces on every joint, backed by gz_ros2_control/GazeboSimSystem
+     The arm is exposed as a xacro macro so cell.xacro can mount it on the table.
+     Geometry is intentionally simple (cylinders) - it only needs to be a valid,
+     controllable kinematic chain that produces a clean TF tree (world -> tcp). -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ================= reusable inertial macros ================= -->
+  <xacro:macro name="cylinder_inertial" params="mass radius length">
+    <inertial>
+      <mass value="${mass}"/>
+      <origin xyz="0 0 ${length/2}" rpy="0 0 0"/>
+      <inertia
+        ixx="${mass*(3*radius*radius + length*length)/12}" ixy="0.0" ixz="0.0"
+        iyy="${mass*(3*radius*radius + length*length)/12}" iyz="0.0"
+        izz="${mass*radius*radius/2}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- one cylinder link (visual + collision + inertial), axis along +z -->
+  <xacro:macro name="arm_link" params="name radius length r g b">
+    <link name="${name}">
+      <visual>
+        <origin xyz="0 0 ${length/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${radius}" length="${length}"/></geometry>
+        <material name="${name}_mat"><color rgba="${r} ${g} ${b} 1.0"/></material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${length/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${radius}" length="${length}"/></geometry>
+      </collision>
+      <xacro:cylinder_inertial mass="1.0" radius="${radius}" length="${length}"/>
+    </link>
+  </xacro:macro>
+
+  <!-- ================= the 6-DOF arm ================= -->
+  <!-- parent : link the arm base is rigidly mounted to (e.g. the table top)
+       *origin: placement of base_link wrt parent -->
+  <xacro:macro name="kitting_arm" params="parent *origin">
+
+    <!-- link lengths (m) -->
+    <xacro:property name="l_base"  value="0.10"/>
+    <xacro:property name="l_1"     value="0.15"/>
+    <xacro:property name="l_2"     value="0.40"/>
+    <xacro:property name="l_3"     value="0.35"/>
+    <xacro:property name="l_4"     value="0.10"/>
+    <xacro:property name="l_5"     value="0.10"/>
+    <xacro:property name="l_6"     value="0.08"/>
+
+    <!-- common revolute limits -->
+    <xacro:property name="j_eff"   value="100.0"/>
+    <xacro:property name="j_vel"   value="2.0"/>
+    <xacro:property name="j_lo"    value="${-pi}"/>
+    <xacro:property name="j_hi"    value="${pi}"/>
+
+    <!-- base rigidly attached to the parent (table top) -->
+    <xacro:arm_link name="base_link" radius="0.06" length="${l_base}" r="0.2" g="0.2" b="0.2"/>
+    <joint name="base_mount" type="fixed">
+      <parent link="${parent}"/>
+      <child  link="base_link"/>
+      <xacro:insert_block name="origin"/>
+    </joint>
+
+    <!-- link_1 : shoulder pan (about z) -->
+    <xacro:arm_link name="link_1" radius="0.05" length="${l_1}" r="0.8" g="0.4" b="0.1"/>
+    <joint name="shoulder_pan_joint" type="revolute">
+      <parent link="base_link"/>
+      <child  link="link_1"/>
+      <origin xyz="0 0 ${l_base}" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit effort="${j_eff}" velocity="${j_vel}" lower="${j_lo}" upper="${j_hi}"/>
+    </joint>
+
+    <!-- link_2 : shoulder lift (about y) -->
+    <xacro:arm_link name="link_2" radius="0.05" length="${l_2}" r="0.8" g="0.4" b="0.1"/>
+    <joint name="shoulder_lift_joint" type="revolute">
+      <parent link="link_1"/>
+      <child  link="link_2"/>
+      <origin xyz="0 0 ${l_1}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="${j_eff}" velocity="${j_vel}" lower="${j_lo}" upper="${j_hi}"/>
+    </joint>
+
+    <!-- link_3 : elbow (about y) -->
+    <xacro:arm_link name="link_3" radius="0.04" length="${l_3}" r="0.8" g="0.4" b="0.1"/>
+    <joint name="elbow_joint" type="revolute">
+      <parent link="link_2"/>
+      <child  link="link_3"/>
+      <origin xyz="0 0 ${l_2}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="${j_eff}" velocity="${j_vel}" lower="${j_lo}" upper="${j_hi}"/>
+    </joint>
+
+    <!-- link_4 : wrist 1 (about y) -->
+    <xacro:arm_link name="link_4" radius="0.035" length="${l_4}" r="0.3" g="0.3" b="0.7"/>
+    <joint name="wrist_1_joint" type="revolute">
+      <parent link="link_3"/>
+      <child  link="link_4"/>
+      <origin xyz="0 0 ${l_3}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="${j_eff}" velocity="${j_vel}" lower="${j_lo}" upper="${j_hi}"/>
+    </joint>
+
+    <!-- link_5 : wrist 2 (about z) -->
+    <xacro:arm_link name="link_5" radius="0.035" length="${l_5}" r="0.3" g="0.3" b="0.7"/>
+    <joint name="wrist_2_joint" type="revolute">
+      <parent link="link_4"/>
+      <child  link="link_5"/>
+      <origin xyz="0 0 ${l_4}" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit effort="${j_eff}" velocity="${j_vel}" lower="${j_lo}" upper="${j_hi}"/>
+    </joint>
+
+    <!-- link_6 : wrist 3 (about y) -->
+    <xacro:arm_link name="link_6" radius="0.03" length="${l_6}" r="0.3" g="0.3" b="0.7"/>
+    <joint name="wrist_3_joint" type="revolute">
+      <parent link="link_5"/>
+      <child  link="link_6"/>
+      <origin xyz="0 0 ${l_5}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="${j_eff}" velocity="${j_vel}" lower="${j_lo}" upper="${j_hi}"/>
+    </joint>
+
+    <!-- tcp : tool centre point used by the safety monitor (world -> tcp) -->
+    <link name="tcp"/>
+    <joint name="tcp_fixed" type="fixed">
+      <parent link="link_6"/>
+      <child  link="tcp"/>
+      <origin xyz="0 0 ${l_6}" rpy="0 0 0"/>
+    </joint>
+
+    <!-- ================= ros2_control wiring (SR26_08 pattern) ================= -->
+    <ros2_control name="GazeboSimSystem" type="system">
+      <hardware>
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </hardware>
+      <xacro:macro name="arm_joint_iface" params="jname">
+        <joint name="${jname}">
+          <command_interface name="position">
+            <param name="min">${j_lo}</param>
+            <param name="max">${j_hi}</param>
+          </command_interface>
+          <state_interface name="position"/>
+          <state_interface name="velocity"/>
+        </joint>
+      </xacro:macro>
+      <xacro:arm_joint_iface jname="shoulder_pan_joint"/>
+      <xacro:arm_joint_iface jname="shoulder_lift_joint"/>
+      <xacro:arm_joint_iface jname="elbow_joint"/>
+      <xacro:arm_joint_iface jname="wrist_1_joint"/>
+      <xacro:arm_joint_iface jname="wrist_2_joint"/>
+      <xacro:arm_joint_iface jname="wrist_3_joint"/>
+    </ros2_control>
+
+  </xacro:macro>
+</robot>

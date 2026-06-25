@@ -1,0 +1,41 @@
+# controllers.yaml - SafeCollab ros2_control configuration (Stream A).
+# Loaded by gz_ros2_control::GazeboSimROS2ControlPlugin (see cell.xacro) which
+# starts an in-process controller_manager. Mirrors the SR26_08 pattern:
+#   joint_state_broadcaster  -> publishes /joint_states
+#   arm_controller           -> joint_trajectory_controller on the 6 arm joints
+#
+# Exit-gate check:
+#   ros2 control list_controllers
+#     joint_state_broadcaster [joint_state_broadcaster/JointStateBroadcaster] active
+#     arm_controller          [joint_trajectory_controller/JointTrajectoryController] active
+
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+# --- arm_controller: subscribes /arm_controller/joint_trajectory (§3 contract) ---
+arm_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    # tolerances kept permissive; motion_node (Stream D) owns re-timing
+    allow_partial_joints_goal: false
+    open_loop_control: true
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
