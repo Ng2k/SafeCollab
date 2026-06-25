@@ -1,0 +1,59 @@
+# SafeCollab pre-commit hooks (AGENTS.md §7 — same linters run in CI).
+# Install once:   pre-commit install && pre-commit install --hook-type commit-msg
+# Run on all:     pre-commit run --all-files
+---
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  # --- generic hygiene -----------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-yaml
+        # ROS/gz launch & config can use multi-doc / custom tags; keep it lenient.
+        args: [--allow-multiple-documents]
+      - id: check-executables-have-shebangs
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # --- Python lint + format (ruff replaces flake8 + black) -----------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # --- YAML lint -----------------------------------------------------------
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args:
+          - -d
+          - "{extends: default, rules: {line-length: {max: 120},
+            document-start: disable, truthy: {check-keys: false},
+            comments: {min-spaces-from-content: 1}}}"
+
+  # --- commit-message policy ----------------------------------------------
+  # Conventional Commits (feat:/fix:/ci:/docs:...) — AGENTS.md §7a.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  # HARD CONSTRAINT (AGENTS.md ground rule 7): commits must carry NO
+  # AI-attribution trailer. Fail the commit if one slips in.
+  - repo: local
+    hooks:
+      - id: no-ai-attribution
+        name: block AI-attribution trailers (ground rule 7)
+        language: pygrep
+        entry: '(?i)(co-authored-by:\s*.*(claude|anthropic)|generated with.*(claude|anthropic)|🤖\s*generated with)'
+        stages: [commit-msg]
