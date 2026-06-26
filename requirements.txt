@@ -19,7 +19,10 @@ yamllint>=1.35
 pyyaml>=6.0
 
 # Perception (Stream C)
-opencv-python>=4.9
+# headless: same cv2 API, but no GUI/X11 dependency (libGL.so.1) — required
+# for headless containers (CI, Docker) that have no display. Stream C's code
+# never calls cv2.imshow/GUI functions, so this is a drop-in replacement.
+opencv-python-headless>=4.9
 numpy>=1.26
 
 # ROS-side packages (rclpy, tf2, launch_testing, etc.) are provided by the
