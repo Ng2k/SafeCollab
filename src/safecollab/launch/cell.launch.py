@@ -3,19 +3,20 @@
 # This is the single entry point for running the complete SafeCollab kitting cell.
 # It is the integration point that wires together all streams.
 #
-# What is wired (present on main today — v0.2.0):
+# What is wired (the full closed-loop cell):
 #   1. gz sim            — headless server or full GUI, controlled by headless:=true
 #   2. robot_state_publisher — cell.xacro via Command(['xacro ', ...]) (Stream A)
 #   3. ros_gz_sim create — spawn the model into gz (Stream A)
 #   4. joint_state_broadcaster + arm_controller spawners — ordered via OnProcessExit (Stream A)
-#   5. ros_gz_image bridge — gz camera/image -> ROS /camera/image (critical path for Stream C)
-#   6. task_node         — kitting state machine + nominal trajectory publisher (Stream E)
-#   7. human_node        — ground-truth operator model, broadcasts world->human_gt TF (Stream E)
-#   8. motion_node       — fuses nominal trajectory * safety scale, commands arm (Stream D)
+#   5. ros_gz_image bridge — gz camera/image -> ROS /camera/image (Stream C input)
+#   6. ros_gz_bridge       — gz clock -> ROS /clock (sim time for every node)
+#   7. task_node         — kitting state machine + nominal trajectory publisher (Stream E)
+#   8. human_node        — ground-truth operator model, broadcasts world->human_gt TF (Stream E)
+#   9. motion_node       — fuses nominal trajectory * safety scale, commands arm (Stream D)
+#  10. perception_node   — camera -> perceived world->human TF + /human/uncertainty (Stream C)
+#  11. safety_monitor    — min-distance -> /safety/scale + /safety/zone, fail-safe (Stream F)
 #
-# What is a placeholder (not yet on main — see PLACEHOLDER blocks below):
-#   * perception_node    — Stream C (perception); needs perception_node.py + setup.py entry_point
-#   * safety_monitor     — Stream F (safety loop closure); needs safety_monitor.py + setup.py entry_point
+# The safety loop is closed: perception_node -> safety_monitor -> /safety/scale -> motion_node.
 #
 # headless:=true is required by CI (§7 integration and package stages).  See §8:
 #   ros2 launch safecollab cell.launch.py headless:=true
@@ -223,47 +224,40 @@ def generate_launch_description():
         parameters=[{"use_sim_time": True}],
     )
 
-    # ---- PLACEHOLDER: Stream C — perception_node (NOT YET ON MAIN) ---------------
-    #
-    # When Stream C is merged:
-    #   1. Uncomment the Node block below.
-    #   2. Add 'perception_node = safecollab.perception_node:main' to entry_points
-    #      in setup.py (owned by Stream C — do not add here).
-    #   3. Add perception_node to the LaunchDescription list at the bottom.
-    #
-    # Node role: subscribes /camera/image -> classical CV -> broadcasts world->human
-    # TF (perceived, not ground truth) + publishes /human/uncertainty (Float32, σ m).
-    # Loss timeout -> publishes "lost" state to trigger the safety fail-safe (FR-9).
-    #
-    # perception_node = Node(
-    #     package="safecollab",
-    #     executable="perception_node",
-    #     output="screen",
-    #     parameters=[{"use_sim_time": True}],
-    # )
-    # -------------------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Stream C: perception_node — closes the input half of the safety loop.
+    # Subscribes /camera/image -> classical CV -> broadcasts the *perceived*
+    # world->human TF + publishes /human/uncertainty (Float32, σ m). On loss
+    # (no detection within the timeout) it stops broadcasting the human TF,
+    # which trips safety_monitor's fail-safe (FR-9 / AT-5).
+    # NOTE: until the operator is given a camera-visible model in gz (human_node
+    # currently only broadcasts the world->human_gt ground-truth TF, no visual),
+    # perception sees no blob and reports lost — so the loop sits in the
+    # protective-stop fail-safe. That is correct safe behaviour; demonstrating
+    # the green/yellow/red ramp needs a visible operator (next task).
+    # ------------------------------------------------------------------
 
-    # ---- PLACEHOLDER: Stream F — safety_monitor (NOT YET ON MAIN) ----------------
-    #
-    # When Stream F is merged:
-    #   1. Uncomment the Node block below.
-    #   2. Add 'safety_monitor = safecollab.safety_monitor:main' to entry_points
-    #      in setup.py (owned by Stream F — do not add here).
-    #   3. Add config/safety.yaml to data_files in setup.py (Stream F also owns this).
-    #   4. Add safety_monitor to the LaunchDescription list at the bottom.
-    #
-    # Node role: reads world->human TF + /human/uncertainty (σ), computes min
-    # separation over robot frames (TCP, wrist, elbow), calls safety_logic.classify()
-    # -> publishes /safety/scale (Float32 0.0-1.0) + /safety/zone (String green|yellow|red|lost).
-    # Fail-safe: stops the arm if perception is lost/stale (FR-9 / AT-5).
-    #
-    # safety_monitor = Node(
-    #     package="safecollab",
-    #     executable="safety_monitor",
-    #     output="screen",
-    #     parameters=[{"use_sim_time": True}],
-    # )
-    # -------------------------------------------------------------------------------
+    perception_node = Node(
+        package="safecollab",
+        executable="perception_node",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+    )
+
+    # ------------------------------------------------------------------
+    # Stream F: safety_monitor — closes the loop. Reads the perceived world->human
+    # TF + /human/uncertainty (σ), sweeps min separation over robot frames
+    # (tcp, link_6, link_3 — see config/safety.yaml), calls safety_logic.classify()
+    # and publishes /safety/scale (Float32 0..1) + /safety/zone (green|yellow|red|
+    # lost). Fail-safe: stale/absent human TF -> ("lost", 0.0) protective stop.
+    # ------------------------------------------------------------------
+
+    safety_monitor = Node(
+        package="safecollab",
+        executable="safety_monitor",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+    )
 
     return LaunchDescription(
         [
@@ -284,11 +278,12 @@ def generate_launch_description():
                 OnProcessExit(target_action=jsb_spawner, on_exit=[arm_spawner])
             ),
             camera_bridge,
-            # --- application nodes (present on main) ---
+            # --- application nodes ---
             task_node,
             human_node,
             motion_node,
-            # perception_node,  # Stream C — NOT YET ON MAIN (see PLACEHOLDER above)
-            # safety_monitor,   # Stream F — NOT YET ON MAIN (see PLACEHOLDER above)
+            # --- safety loop: perception -> safety_monitor -> motion scale ---
+            perception_node,  # Stream C
+            safety_monitor,  # Stream F
         ]
     )

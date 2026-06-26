@@ -13,6 +13,7 @@ FROM ros:jazzy-ros-base
 #   - xacro .......................... expands cell.xacro for robot_state_publisher
 #   - robot-state-publisher .......... publishes robot_description / TF in cell.launch.py
 #   - python3-opencv ................. classical CV for perception_node
+#   - cv-bridge ...................... sensor_msgs/Image <-> cv2 in perception_node
 #   - python3-pytest(-cov) ........... unit test + coverage gate (>= 90%)
 #   - launch-testing(-ros) ........... headless integration bring-up harness (§7.4)
 #
@@ -33,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-robot-state-publisher \
         ros-jazzy-launch-testing \
         ros-jazzy-launch-testing-ros \
+        ros-jazzy-cv-bridge \
         python3-opencv \
         python3-pytest \
         python3-pytest-cov \
