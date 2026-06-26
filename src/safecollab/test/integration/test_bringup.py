@@ -115,50 +115,46 @@ def _wait_controllers_active(timeout_s=30.0):
     return False
 
 
-def _measure_hz(topic, window_s=3.0):
-    """Return the average publish rate (Hz) of *topic*, or ``None`` on failure.
+def _measure_rate_simtime(topic, msg_type, n_samples=40, timeout_s=20.0):
+    """Average publish rate of *topic* measured in SIMULATION time (Hz).
 
-    Spawns ``ros2 topic hz`` in a subprocess, reads the first
-    ``average rate:`` line within ``window_s + 5`` seconds via a daemon
-    thread (so ``readline()`` never blocks the timeout loop), then
-    terminates the subprocess.  Stderr is discarded to prevent the OS
-    pipe buffer from filling and deadlocking the child.
+    ``ros2 topic hz`` measures wall-clock rate, which under-reports a
+    sim-time-driven publisher when the headless sim runs below real-time
+    (RTF < 1 — typical on a CPU-limited CI runner: a true 20 Hz sim-time timer
+    reads ~15.5 Hz wall-clock at RTF≈0.78).  ``safety_monitor``'s timer fires on
+    sim time (``use_sim_time:=true``), so we time the messages against a
+    ``use_sim_time`` probe node's clock (which follows ``/clock``) — making the
+    result independent of the real-time factor.
+
+    Returns the rate in Hz, or ``None`` if fewer than two messages arrive
+    within ``timeout_s`` wall-clock seconds.
     """
-    proc = subprocess.Popen(
-        ["ros2", "topic", "hz", topic],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
+    import rclpy
+    from rclpy.parameter import Parameter
+
+    rclpy.init()
+    node = rclpy.create_node(
+        "_safecollab_rate_probe",
+        parameter_overrides=[Parameter("use_sim_time", Parameter.Type.BOOL, True)],
     )
-    lq = queue.Queue()
+    sim_stamps_ns = []
 
-    def _reader():
-        for line in proc.stdout:
-            lq.put(line)
+    def _cb(_msg):
+        sim_stamps_ns.append(node.get_clock().now().nanoseconds)
 
-    threading.Thread(target=_reader, daemon=True).start()
-
-    rate = None
-    deadline = time.monotonic() + window_s + 5.0
-    while time.monotonic() < deadline:
-        try:
-            line = lq.get(timeout=0.5)
-        except queue.Empty:
-            continue
-        if "average rate:" in line:
-            try:
-                rate = float(line.split("average rate:")[-1].strip())
-                break
-            except ValueError:
-                pass
-
-    proc.terminate()
+    node.create_subscription(msg_type, topic, _cb, 10)
+    deadline = time.monotonic() + timeout_s
     try:
-        proc.wait(timeout=5.0)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-    return rate
+        while len(sim_stamps_ns) < n_samples and time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=0.1)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+    if len(sim_stamps_ns) < 2:
+        return None
+    sim_dt = (sim_stamps_ns[-1] - sim_stamps_ns[0]) / 1e9
+    return (len(sim_stamps_ns) - 1) / sim_dt if sim_dt > 0 else None
 
 
 def _tf_available(parent, child, timeout_s=8.0):
@@ -234,12 +230,15 @@ class TestHeadlessBringup(unittest.TestCase):
     def test_safety_topic_rate(self, cell_present):
         if not cell_present:
             self.skipTest("cell not built yet; /safety/scale rate check pending.")
-        # safety_monitor publishes /safety/scale at 20 Hz regardless of zone —
-        # even in the 'lost' fail-safe state the 20 Hz timer fires and emits
-        # scale=0.0 (see SafetyMonitorNode._tick).  18 Hz floor gives ~10 %
-        # headroom for scheduler jitter and sim-time startup transients without
-        # masking a node that is genuinely stuck or throttled.
-        rate = _measure_hz("/safety/scale", window_s=3.0)
+        # safety_monitor publishes /safety/scale on a 20 Hz timer regardless of
+        # zone — even in the 'lost' fail-safe state it emits scale=0.0 (see
+        # SafetyMonitorNode._tick).  The timer fires on SIM time (use_sim_time),
+        # so we measure in sim time: a wall-clock measurement under-reports by
+        # the real-time factor when the headless sim runs below 1x. 18 Hz floor
+        # = ~10 % margin on the true 20 Hz, independent of RTF.
+        from std_msgs.msg import Float32
+
+        rate = _measure_rate_simtime("/safety/scale", Float32)
         self.assertIsNotNone(
             rate,
             "/safety/scale did not publish any messages within the measurement "
@@ -248,8 +247,8 @@ class TestHeadlessBringup(unittest.TestCase):
         self.assertGreaterEqual(
             rate,
             18.0,
-            f"/safety/scale rate {rate:.1f} Hz is below the 18 Hz floor "
-            "(safety_monitor targets 20 Hz; 10 % margin allowed for jitter).",
+            f"/safety/scale sim-time rate {rate:.1f} Hz is below the 18 Hz floor "
+            "(safety_monitor targets 20 Hz; measured in sim time, RTF-independent).",
         )
 
     def test_tf_chain(self, cell_present):
