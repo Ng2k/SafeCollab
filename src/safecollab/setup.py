@@ -14,7 +14,13 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         # urdf/xacro files -- required so FindPackageShare('safecollab') resolves
         # cell.xacro / arm.xacro after `colcon build`
-        (os.path.join("share", package_name, "urdf"), glob("urdf/*.xacro")),
+        # urdf/*.sdf  -- operator.sdf (yellow visual body) must also be installed
+        # so that cell.launch.py's `ros_gz_sim create -file` can resolve the path
+        # via FindPackageShare('safecollab')/urdf/operator.sdf after colcon build.
+        (
+            os.path.join("share", package_name, "urdf"),
+            glob("urdf/*.xacro") + glob("urdf/*.sdf"),
+        ),
         # config files (controllers/risk/safety yaml + view.rviz) -- same reason.
         (
             os.path.join("share", package_name, "config"),

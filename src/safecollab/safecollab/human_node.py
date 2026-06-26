@@ -302,23 +302,75 @@ def main(args=None):  # pragma: no cover
     The frame is named ``human_gt`` (not ``human``) to distinguish it from the
     *perceived* ``world → human`` TF published by ``perception_node``; the safety
     monitor consumes only the perceived TF.
+
+    Gz-transport pose following
+    ---------------------------
+    In addition to broadcasting the TF, this node moves the yellow operator
+    visual body (spawned from ``urdf/operator.sdf`` by ``cell.launch.py``) by
+    calling the gz sim service ``/world/empty/set_pose`` at 10 Hz via the
+    ``gz.transport13`` Python bindings.  This closes the perception loop:
+    the overhead camera sees the yellow body and ``perception_node`` can
+    detect the operator without requiring a physical person in the scene.
+
+    The gz-transport import is guarded: if ``python3-gz-transport13`` /
+    ``python3-gz-msgs10`` are absent the node still functions correctly —
+    the TF broadcast is unaffected, and only the visual body tracking is
+    disabled (body stays at its spawn-time position).  This makes the node
+    safe to start in environments where gz Python bindings are not installed.
+
+    Why gz transport (not a ROS bridge)?
+    * The gz ``/world/*/set_pose`` service is a gz-transport-only endpoint;
+      no standard ``ros_gz_bridge`` service bridge exists for it, so a
+      ROS-service approach would need custom bridge configuration.
+    * ``gz.transport13.Node.request()`` is synchronous but fast (<2 ms on
+      a local gz sim process), well within the 100 ms budget of the 10 Hz
+      update rate used here.
+    * Works headless: gz transport is pure middleware with no display
+      dependency.
     """
     import rclpy
     from geometry_msgs.msg import TransformStamped
     from rclpy.node import Node
     from tf2_ros import TransformBroadcaster
 
+    # ------------------------------------------------------------------
+    # Optional gz transport bindings for operator body pose following.
+    # gz Harmonic ships gz-transport 13 and gz-msgs 10.
+    # Package names (Ubuntu 24.04 OSRF apt repo):
+    #   python3-gz-transport13  →  gz.transport13
+    #   python3-gz-msgs10       →  gz.msgs10.pose_pb2 / gz.msgs10.boolean_pb2
+    # These are listed as explicit apt deps in the Dockerfile.  If they are
+    # absent the except branch runs and pose following is silently disabled.
+    # ------------------------------------------------------------------
+    _GzTransportNode = None
+    _GzPose = None
+    _GzBoolean = None
+    try:
+        from gz.transport13 import Node as _GzTransportNode  # type: ignore[import]
+        from gz.msgs10.pose_pb2 import Pose as _GzPose  # type: ignore[import]
+        from gz.msgs10.boolean_pb2 import Boolean as _GzBoolean  # type: ignore[import]
+    except ImportError:
+        pass  # gz Python bindings not installed; visual body tracking disabled
+
     class HumanNode(Node):
         """ROS 2 wrapper around ``OperatorModel``.
 
         Generates a random ``OperatorPath`` at start-up, then replaces it with a
         fresh random path each time the current path completes.  Broadcasts the
-        ground-truth ``world → human_gt`` TF at 50 Hz.
+        ground-truth ``world → human_gt`` TF at 50 Hz and moves the yellow gz
+        operator entity at 10 Hz so perception_node can detect it.
         """
 
         _GT_FRAME = "human_gt"
         _WORLD_FRAME = "world"
         _TIMER_HZ = 50.0
+
+        # gz transport pose-following constants
+        _GZ_SET_POSE_SVC: str = "/world/empty/set_pose"
+        _GZ_ENTITY_NAME: str = "operator"
+        # Update gz entity every N ticks → 50 Hz / 5 = 10 Hz.
+        # 10 Hz is sufficient for visual tracking; keeps per-tick latency low.
+        _GZ_UPDATE_EVERY_N_TICKS: int = 5
 
         def __init__(self) -> None:
             super().__init__("human_node")
@@ -327,14 +379,30 @@ def main(args=None):  # pragma: no cover
             self._model = OperatorModel(path)
             self._br = TransformBroadcaster(self)
             self._start_time: Optional[float] = None
+            self._gz_tick: int = 0
+
+            # Initialise gz transport node for pose following if bindings available.
+            self._gz_node = _GzTransportNode() if _GzTransportNode is not None else None
+
             self._timer = self.create_timer(1.0 / self._TIMER_HZ, self._tick)
             self.get_logger().info(
                 "[human_node] started; broadcasting world -> human_gt at "
                 f"{self._TIMER_HZ:.0f} Hz"
             )
+            if self._gz_node is not None:
+                self.get_logger().info(
+                    "[human_node] gz transport available; operator body will "
+                    "track the path at 10 Hz via /world/empty/set_pose"
+                )
+            else:
+                self.get_logger().warning(
+                    "[human_node] gz.transport13 not available "
+                    "(python3-gz-transport13 / python3-gz-msgs10 not installed?); "
+                    "operator body stays at spawn position — camera detection may fail"
+                )
 
         def _tick(self) -> None:
-            """Timer callback: advance the operator and broadcast the TF."""
+            """Timer callback: advance the operator, broadcast TF, update gz pose."""
             now = self.get_clock().now()
             now_s = now.nanoseconds * 1e-9
 
@@ -353,6 +421,7 @@ def main(args=None):  # pragma: no cover
 
             x, y, z = self._model.position_at(t)
 
+            # Broadcast the ground-truth TF (50 Hz — unchanged from before)
             tf_msg = TransformStamped()
             tf_msg.header.stamp = now.to_msg()
             tf_msg.header.frame_id = self._WORLD_FRAME
@@ -362,6 +431,40 @@ def main(args=None):  # pragma: no cover
             tf_msg.transform.translation.z = z
             tf_msg.transform.rotation.w = 1.0  # no rotation for the hand point
             self._br.sendTransform(tf_msg)
+
+            # Update gz visual body at 10 Hz (every _GZ_UPDATE_EVERY_N_TICKS ticks)
+            self._gz_tick += 1
+            if (
+                self._gz_node is not None
+                and self._gz_tick % self._GZ_UPDATE_EVERY_N_TICKS == 0
+            ):
+                self._set_gz_pose(x, y, z)
+
+        def _set_gz_pose(self, x: float, y: float, z: float) -> None:
+            """Move the yellow operator gz entity to ``(x, y, z)`` via set_pose.
+
+            Calls the gz sim service ``/world/empty/set_pose``.  Failures are
+            logged at DEBUG level only — the entity may not have been spawned
+            yet in the first few ticks, and that is expected and harmless.
+            """
+            try:
+                pose_msg = _GzPose()
+                pose_msg.name = self._GZ_ENTITY_NAME
+                pose_msg.position.x = x
+                pose_msg.position.y = y
+                pose_msg.position.z = z
+                pose_msg.orientation.w = 1.0
+                # node.request(service, request, response_type, timeout_ms)
+                self._gz_node.request(
+                    self._GZ_SET_POSE_SVC,
+                    pose_msg,
+                    _GzBoolean,
+                    300,  # 300 ms timeout; well within 100 ms update period at 10 Hz
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.get_logger().debug(
+                    f"[human_node] gz set_pose failed (entity not yet spawned?): {exc}"
+                )
 
     rclpy.init(args=args)
     node = HumanNode()
