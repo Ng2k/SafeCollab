@@ -28,7 +28,7 @@ setup(
         "console_scripts": [
             "task_node = safecollab.task_node:main",
             "human_node = safecollab.human_node:main",
-            # 'perception_node = safecollab.perception_node:main',
+            "perception_node = safecollab.perception_node:main",
             # 'safety_monitor = safecollab.safety_monitor:main',
             "motion_node = safecollab.motion_node:main",
         ],
