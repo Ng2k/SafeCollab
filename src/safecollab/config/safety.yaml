@@ -1,0 +1,41 @@
+# Safety monitor configuration — Stream F owns this file (AGENTS.md §6).
+#
+# Parameters are READ at node start-up and passed to SafetyMonitorLogic.
+# Nothing safety-related is hard-coded in safety_monitor.py
+# (AGENTS.md ground rule 5: config, not constants).
+#
+# s_min
+#   Minimum speed scale inside the yellow band.  At the red edge of the ramp
+#   the arm runs no slower than this fraction of full speed (the "floor" in the
+#   ISO/TS 15066 ramp).  Must be in (0, 1); 0.10 = 10 % of full speed.
+#
+# loss_timeout
+#   Seconds of absent or stale perceived-human TF before the fail-safe "lost"
+#   state is triggered (FR-9 / AT-5).  The ROS wrapper treats any TF older than
+#   this as missing and passes d=None to classify(), which returns ("lost", 0.0)
+#   — a protective stop.  The last known position is NEVER assumed still valid.
+#
+#   Derivation: Stream C guarantees detection latency ≤ 100 ms (AGENTS.md §6,
+#   Stream C "Must:" clause).  A timeout of 0.5 s gives five missed detection
+#   cycles at 10 Hz (conservative side) before declaring lost, while still being
+#   tight enough that an occluded robot does not run free for more than half a
+#   second.
+#
+# robot_frames
+#   TF frame names to include in the min-distance sweep.  Must be a subset of
+#   the frames published by the arm's robot_state_publisher (arm.xacro / Stream A).
+#   Tcp and link_6 (the final wrist joint's link) are the highest-risk frames;
+#   link_3 (the elbow joint's link) is included as a second backstop, since the
+#   arm can swing the elbow close to the operator even when the TCP is clear.
+#   The safety monitor takes the MINIMUM distance over all frames. Link names
+#   match arm.xacro's actual link naming (link_1..link_6, tcp) — there are no
+#   links literally named "wrist"/"elbow"; those names belong to the joints.
+
+safety:
+  s_min: 0.10          # minimum speed scale in the yellow band (10 % of full speed)
+  loss_timeout: 0.5    # seconds before a stale/missing human TF triggers the fail-safe
+  robot_frames:        # TF frame names swept for min-distance (AGENTS.md §3)
+    - tcp
+    - link_6
+    - link_3
+  marker_radius: 0.15  # radius (m) of the RViz safety-zone sphere at the human position
