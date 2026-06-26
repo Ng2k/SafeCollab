@@ -105,19 +105,20 @@ class TestCleanShutdown(unittest.TestCase):
     def test_exit_codes(self, proc_info, cell_present):
         if not cell_present:
             self.skipTest("nothing launched; no exit codes to check.")
-        # gz sim runs as `ruby ... gz sim -s ...`; that wrapper routinely fails
-        # to finish its SIGINT shutdown inside launch's 5 s grace period, so
-        # launch escalates to SIGTERM and the gz process exits with -SIGTERM.
-        # That is a benign *teardown* artifact, not a bring-up crash, so SIGTERM
-        # is allowed alongside the clean (0) and SIGINT (-2) shutdown codes.
-        # A node that actually crashes during bring-up exits with a non-signal
-        # code (e.g. 1 on an unhandled exception) and is still caught here.
-        # (launch_testing.asserts has no EXIT_SIGTERM constant — use the signal.)
+        # Allowed shutdown codes, using Python's signal convention (negative =
+        # killed by that signal) because that is exactly what launch reports in
+        # `info.returncode`:
+        #   0            clean exit (nodes that handle SIGINT and return)
+        #   -SIGINT (-2) SIGINT at teardown — normal for the nodes and for the
+        #                one-shot controller spawners interrupted mid-run
+        #   -SIGTERM(-15) gz sim's `ruby ... gz sim` wrapper misses launch's 5 s
+        #                SIGINT grace period, so launch escalates to SIGTERM
+        # NB: do NOT use launch_testing.asserts.EXIT_SIGINT here — in this
+        # version that constant follows the 128+signum shell convention (130),
+        # not the -2 that launch actually reports, so it silently excludes the
+        # normal SIGINT code. A genuine bring-up crash exits with a non-signal
+        # code (e.g. 1) and is still caught.
         launch_testing.asserts.assertExitCodes(
             proc_info,
-            allowable_exit_codes=[
-                launch_testing.asserts.EXIT_OK,
-                launch_testing.asserts.EXIT_SIGINT,
-                -signal.SIGTERM,
-            ],
+            allowable_exit_codes=[0, -signal.SIGINT, -signal.SIGTERM],
         )
