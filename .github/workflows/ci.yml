@@ -6,6 +6,9 @@
 # message until the owning streams land the modules, so main stays green while
 # the pipeline is complete. `deliver` publishes a GitHub Release on this repo
 # (never an external registry) only on a vX.Y.Z tag.
+#
+# 2026-06-26: bumped actions/checkout, actions/setup-python, actions/upload-artifact
+# from v4/v5 to v6 (Node.js 24 native; v4/v5 ran on the now-deprecated Node.js 20).
 ---
 name: CI
 
@@ -32,8 +35,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install linters
@@ -54,14 +57,14 @@ jobs:
     runs-on: ubuntu-latest
     container: ros:jazzy-ros-base
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: colcon build (from scratch)
         shell: bash
         run: |
           source /opt/ros/${ROS_DISTRO}/setup.bash
           colcon build --symlink-install
       - name: Upload build/install overlay
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: colcon-overlay
           path: |
@@ -77,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     container: ros:jazzy-ros-base
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: pytest + coverage gate (>= 90% on safety & risk)
         shell: bash
         run: |
@@ -101,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     container: ros:jazzy-ros-base
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: launch_test (headless)
         shell: bash
         run: |
@@ -123,7 +126,7 @@ jobs:
     needs: [integration]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build the container image
         run: docker build -t safecollab:ci .
       - name: Smoke test — ROS env sources inside the image
@@ -152,7 +155,7 @@ jobs:
     permissions:
       contents: write # required to create a Release on this repo
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Resolve image tag
         id: meta
         run: |
@@ -168,7 +171,7 @@ jobs:
           docker save safecollab:${{ steps.meta.outputs.tag }} \
             | gzip > safecollab-${{ steps.meta.outputs.tag }}.tar.gz
       - name: Upload tarball as a workflow artifact (every run)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: safecollab-image-${{ steps.meta.outputs.tag }}
           path: safecollab-${{ steps.meta.outputs.tag }}.tar.gz
