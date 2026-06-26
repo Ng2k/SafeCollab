@@ -29,6 +29,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from safecollab.risk import load_config as load_risk_config
 from safecollab.safety_monitor import SafetyMonitorLogic, load_safety_config
@@ -586,3 +587,42 @@ class TestFullPipelineScenario:
         )
         assert zone_ok == "green", "clean resume: zone must be green after retreat"
         assert scale_ok == pytest.approx(1.0), "clean resume: scale must return to 1.0"
+
+
+# ---------------------------------------------------------------------------
+# safety_source field in safety.yaml (AGENTS.md §11 cut-scope fallback #4)
+#
+# The pure-Python SafetyMonitorLogic layer is NOT affected by safety_source —
+# it takes human_xyz directly; frame selection is the ROS wrapper's job.
+# These tests verify the YAML contract so a misconfigured file is caught early.
+# ---------------------------------------------------------------------------
+
+
+class TestSafetyYamlSafetySource:
+    """safety.yaml must contain safety_source: perceived (the default).
+
+    The field documents the §11 fallback toggle; the ROS wrapper reads it as
+    a ROS parameter (default "perceived").  Tests here guard the YAML contract
+    so a stale or corrupted config file is caught by the unit suite, not
+    discovered at runtime.
+    """
+
+    def _load_raw(self) -> dict:
+        with open(_SAFETY_YAML, "r", encoding="utf-8") as fh:
+            return yaml.safe_load(fh)
+
+    def test_safety_source_field_present(self):
+        """safety_source key must exist under the safety: block."""
+        data = self._load_raw()
+        assert "safety_source" in data["safety"], (
+            "safety.yaml is missing 'safety_source' under the 'safety:' block. "
+            "Add it with default 'perceived' per §11 fallback #4."
+        )
+
+    def test_safety_source_default_is_perceived(self):
+        """Default value must be 'perceived' — DoD #5 requires perceived as headline."""
+        data = self._load_raw()
+        assert data["safety"]["safety_source"] == "perceived", (
+            "safety_source default must be 'perceived' (DoD #5). "
+            f"Got: {data['safety']['safety_source']!r}"
+        )

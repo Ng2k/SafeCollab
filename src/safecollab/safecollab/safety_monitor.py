@@ -319,6 +319,32 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
     def __init__(self) -> None:
         super().__init__("safety_monitor")  # type: ignore[call-arg]
 
+        # ------------------------------------------------------------------
+        # safety_source parameter — §11 cut-scope fallback #4
+        #
+        # "perceived"    (default): world → human TF from perception_node.
+        #                           Headline demo path; required by DoD #5.
+        # "ground_truth"          : world → human_gt TF from human_node.
+        #                           Demo fallback when perception is flaky/absent.
+        #
+        # Any other value is rejected with a warning and falls back to "perceived".
+        # ------------------------------------------------------------------
+        _source = self.declare_parameter("safety_source", "perceived").value
+        if _source == "ground_truth":
+            self._HUMAN_FRAME = "human_gt"
+        elif _source == "perceived":
+            self._HUMAN_FRAME = "human"
+        else:
+            self.get_logger().warn(
+                f"[safety_monitor] Unknown safety_source '{_source}'; "
+                "defaulting to 'perceived' (world → human)."
+            )
+            self._HUMAN_FRAME = "human"
+        self.get_logger().info(
+            f"[safety_monitor] safety_source={_source!r} "
+            f"→ TF frame '{self._HUMAN_FRAME}'"
+        )
+
         # Resolve config paths relative to this file (colcon install layout
         # and local editable install both put config/ next to safecollab/).
         _here = Path(__file__).resolve().parent

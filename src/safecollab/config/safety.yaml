@@ -39,3 +39,13 @@ safety:
     - link_6
     - link_3
   marker_radius: 0.15  # radius (m) of the RViz safety-zone sphere at the human position
+  # safety_source (AGENTS.md §11 cut-scope fallback #4)
+  #   "perceived"    (default) — safety loop reads world → human TF from perception_node.
+  #                              This is the headline demo path (DoD #5: perceived human
+  #                              drives the headline demo).
+  #   "ground_truth"           — safety loop reads world → human_gt TF from human_node.
+  #                              Use when perception is unavailable or flaky, so the SSM
+  #                              ramp / stop / resume / fail-safe can be demonstrated
+  #                              without working perception.  Pass as a ROS launch argument:
+  #                              ros2 launch safecollab cell.launch.py safety_source:=ground_truth
+  safety_source: perceived
