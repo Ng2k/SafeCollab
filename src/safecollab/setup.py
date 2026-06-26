@@ -20,9 +20,8 @@ setup(
     tests_require=["pytest", "pytest-cov"],
     entry_points={
         "console_scripts": [
-            # Application nodes are registered here as each stream lands them, e.g.:
-            # 'task_node = safecollab.task_node:main',
-            # 'human_node = safecollab.human_node:main',
+            "task_node = safecollab.task_node:main",
+            "human_node = safecollab.human_node:main",
             # 'perception_node = safecollab.perception_node:main',
             # 'safety_monitor = safecollab.safety_monitor:main',
             "motion_node = safecollab.motion_node:main",
