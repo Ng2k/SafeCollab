@@ -14,6 +14,8 @@
 # the pipeline is wired and ready (AGENTS.md §6 Stream G, §9 integration layer).
 
 import os
+import signal
+import time
 import unittest
 
 import launch
@@ -64,6 +66,16 @@ def generate_test_description():
     return launch.LaunchDescription(actions), context
 
 
+#: Seconds to let the cell run before the harness tears it down. Without this
+#: settle the active tests finish in ~0.01 s and SIGINT lands *during* each
+#: node's Python interpreter startup, producing nondeterministic exit codes
+#: (-2 normally, but 1 when SIGINT aborts site-module init) that fail the
+#: clean-shutdown check for no real reason. Letting the nodes reach steady
+#: state first means a SIGINT at teardown yields a clean -2 — and a node with a
+#: genuine startup crash now exits during the settle and is still caught.
+_SETTLE_SECONDS = 8.0
+
+
 class TestHeadlessBringup(unittest.TestCase):
     """Assertions over a live, headless cell. Filled in by the owning streams."""
 
@@ -73,6 +85,10 @@ class TestHeadlessBringup(unittest.TestCase):
                 "safecollab/launch/cell.launch.py not built yet "
                 "(arrives with Stream A); integration harness is wired and ready."
             )
+        # Let the full graph reach steady state before the harness tears it
+        # down (see _SETTLE_SECONDS). A node that crashes on startup exits
+        # during this window and is caught by TestCleanShutdown below.
+        time.sleep(_SETTLE_SECONDS)
         # TODO(Stream A/D): assert `arm_controller` + `joint_state_broadcaster`
         # report active via the controller_manager list_controllers service.
 
@@ -96,11 +112,12 @@ class TestCleanShutdown(unittest.TestCase):
         # is allowed alongside the clean (0) and SIGINT (-2) shutdown codes.
         # A node that actually crashes during bring-up exits with a non-signal
         # code (e.g. 1 on an unhandled exception) and is still caught here.
+        # (launch_testing.asserts has no EXIT_SIGTERM constant — use the signal.)
         launch_testing.asserts.assertExitCodes(
             proc_info,
             allowable_exit_codes=[
                 launch_testing.asserts.EXIT_OK,
                 launch_testing.asserts.EXIT_SIGINT,
-                launch_testing.asserts.EXIT_SIGTERM,
+                -signal.SIGTERM,
             ],
         )
