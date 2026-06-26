@@ -13,6 +13,12 @@ FROM ros:jazzy-ros-base
 #   - robot-state-publisher .......... publishes robot_description / TF in cell.launch.py
 #   - python3-opencv ................. classical CV for perception_node
 #   - python3-pytest(-cov) ........... unit test + coverage gate (>= 90%)
+#   - launch-testing(-ros) ........... headless integration bring-up harness (§7.4)
+#
+# This image is the single source of truth for the application dependency set:
+# the CI integration stage runs the headless launch_test INSIDE this image
+# (not a separately-maintained apt list), so a package present here but missing
+# in CI — or vice-versa — cannot happen.
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ros-gz-sim \
@@ -23,6 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-joint-trajectory-controller \
         ros-jazzy-xacro \
         ros-jazzy-robot-state-publisher \
+        ros-jazzy-launch-testing \
+        ros-jazzy-launch-testing-ros \
         python3-opencv \
         python3-pytest \
         python3-pytest-cov \

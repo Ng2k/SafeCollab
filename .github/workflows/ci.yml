@@ -122,13 +122,20 @@ jobs:
 
   # 4) INTEGRATION — headless launch_testing bring-up (AGENTS.md §7.4, §9).
   #    Self-skips until cell.launch.py exists (Stream A).
+  #
+  #    Runs the bring-up test INSIDE the deploy image (the Dockerfile), instead
+  #    of reconstructing the environment on ros:jazzy-ros-base with a parallel,
+  #    hand-maintained apt list that drifts from the Dockerfile. The Dockerfile
+  #    is now the single source of truth for the application dependency set, so
+  #    we stop chasing one missing package per CI run — the test exercises the
+  #    exact artifact we ship. The image already builds the colcon overlay and
+  #    its entrypoint sources ROS + the overlay, so we only invoke launch_test.
   integration:
     needs: [unit]
     runs-on: ubuntu-latest
-    container: ros:jazzy-ros-base
     steps:
       - uses: actions/checkout@v6
-      - name: launch_test (headless)
+      - name: launch_test (headless, inside the deploy image)
         shell: bash
         run: |
           if [ ! -f "${CELL_LAUNCH}" ]; then
@@ -136,25 +143,11 @@ jobs:
                  " harness is wired and ready (Stream A)."
             exit 0
           fi
-          # Same application dependency set as the Dockerfile (AGENTS.md §8) —
-          # cell.launch.py needs ros_gz_sim/gz_ros2_control to come up, not
-          # just the launch_testing framework itself.
-          apt-get update && apt-get install -y --no-install-recommends \
-            ros-${ROS_DISTRO}-launch-testing \
-            ros-${ROS_DISTRO}-launch-testing-ros \
-            ros-${ROS_DISTRO}-ros-gz-sim \
-            ros-${ROS_DISTRO}-ros-gz-image \
-            ros-${ROS_DISTRO}-gz-ros2-control \
-            ros-${ROS_DISTRO}-ros2-control \
-            ros-${ROS_DISTRO}-ros2-controllers \
-            ros-${ROS_DISTRO}-joint-trajectory-controller \
-            ros-${ROS_DISTRO}-xacro \
-            ros-${ROS_DISTRO}-robot-state-publisher \
-            python3-opencv
-          source /opt/ros/${ROS_DISTRO}/setup.bash
-          colcon build --symlink-install
-          source install/setup.bash
-          launch_test src/safecollab/test/integration/test_bringup.py
+          docker build -t safecollab:ci .
+          # entrypoint.sh sources /opt/ros/jazzy + the overlay, then exec's this.
+          # WORKDIR in the image is the workspace root, so the test path resolves.
+          docker run --rm safecollab:ci \
+            launch_test src/safecollab/test/integration/test_bringup.py
 
   # 5) PACKAGE — build the deploy image; verify it launches headless (§7.5).
   package:
