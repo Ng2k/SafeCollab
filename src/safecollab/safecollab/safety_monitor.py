@@ -533,6 +533,13 @@ def main(args: list | None = None) -> None:  # pragma: no cover
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+    except RuntimeError:
+        # Teardown race: rclpy's executor can raise from take_message (e.g. on
+        # the /clock subscription that use_sim_time creates) if it is mid-take
+        # when the SIGINT handler shuts the context down. Benign once the
+        # context is already gone; re-raise otherwise so real errors surface.
+        if rclpy.ok():
+            raise
     finally:
         node.destroy_node()
         # On SIGINT, rclpy's default signal handler already shuts the context
