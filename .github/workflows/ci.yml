@@ -108,7 +108,16 @@ jobs:
           # The safecollab package itself, editable (ground rule 9, step 2) —
           # required for `from safecollab.x import y` to resolve.
           python3 -m pip install --no-cache-dir --break-system-packages -e src/safecollab
-          pytest src/safecollab/test/unit \
+          # -p no:cacheprovider is NOT the fix here; the real issue is that
+          # ros:jazzy-ros-base ships launch_testing's pytest plugin globally,
+          # which auto-loads into every pytest run (including this pure-Python
+          # unit job, which never needs it) and was built against an older
+          # pluggy/pytest hook API than the pytest>=8.0 we install from
+          # requirements.txt. PYTEST_DISABLE_PLUGIN_AUTOLOAD stops pytest from
+          # auto-discovering ANY setuptools-entrypoint plugin (launch_testing
+          # included); pytest-cov is then loaded explicitly with -p, since we
+          # DO want that one.
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -p pytest_cov src/safecollab/test/unit \
             --cov=safecollab --cov-report=term-missing --cov-fail-under=90
 
   # 4) INTEGRATION — headless launch_testing bring-up (AGENTS.md §7.4, §9).
