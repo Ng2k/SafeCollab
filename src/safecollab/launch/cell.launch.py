@@ -142,6 +142,47 @@ def generate_launch_description():
     )
 
     # ------------------------------------------------------------------
+    # Operator visual body spawn — closes the perception loop (Stream E / C)
+    #
+    # Spawns urdf/operator.sdf: a static yellow 0.25×0.25×0.30 m box.
+    # Yellow RGB (1,1,0) → OpenCV HSV hue ≈ 30, inside detect_human()'s
+    # default hue_low=20..hue_high=40 window (perception_node.py line ~192).
+    # Initial pose at the operator path start-position (first waypoint).
+    #
+    # human_node moves the entity at 10 Hz via the gz transport
+    # /world/empty/set_pose service so the camera sees the body track the
+    # ground-truth operator path.  The world->human_gt TF (ground truth)
+    # is broadcast separately at 50 Hz and is unaffected by this spawn.
+    #
+    # headless-safe: `ros_gz_sim create` uses a gz transport service call
+    # internally; it does not require a GUI and works with -s (server-only).
+    # ------------------------------------------------------------------
+
+    operator_sdf = PathJoinSubstitution([pkg, "urdf", "operator.sdf"])
+
+    spawn_operator = Node(
+        package="ros_gz_sim",
+        executable="create",
+        output="screen",
+        arguments=[
+            "-file",
+            operator_sdf,
+            "-name",
+            "operator",
+            # Start at the first waypoint of the operator path
+            # (OperatorPath.generate_random waypoint 0: x=0.9, y=±0.65, z=1.10).
+            # Use y=0 as a neutral starting point; human_node repositions on
+            # the first gz-transport tick (~100 ms after node start).
+            "-x",
+            "0.9",
+            "-y",
+            "0.0",
+            "-z",
+            "1.10",
+        ],
+    )
+
+    # ------------------------------------------------------------------
     # Controller spawners — §6 item 3
     # Ordered via OnProcessExit to guarantee the gz_ros2_control controller_manager
     # (started by the GazeboSimROS2ControlPlugin in cell.xacro) is already running
@@ -283,6 +324,11 @@ def generate_launch_description():
             clock_bridge,
             robot_state_publisher,
             spawn,
+            # Spawn the yellow operator visual body immediately after the robot.
+            # ros_gz_sim create retries internally until gz sim is ready, so no
+            # explicit ordering constraint is needed.  human_node repositions it
+            # via gz transport set_pose on the first tick.
+            spawn_operator,
             # controllers are ordered: spawn -> jsb_spawner -> arm_spawner
             RegisterEventHandler(
                 OnProcessExit(target_action=spawn, on_exit=[jsb_spawner])
