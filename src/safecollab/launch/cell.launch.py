@@ -1,0 +1,273 @@
+# cell.launch.py — SafeCollab integrated cell launch (Stream G, §6)
+#
+# This is the single entry point for running the complete SafeCollab kitting cell.
+# It is the integration point that wires together all streams.
+#
+# What is wired (present on main today — v0.2.0):
+#   1. gz sim            — headless server or full GUI, controlled by headless:=true
+#   2. robot_state_publisher — cell.xacro via Command(['xacro ', ...]) (Stream A)
+#   3. ros_gz_sim create — spawn the model into gz (Stream A)
+#   4. joint_state_broadcaster + arm_controller spawners — ordered via OnProcessExit (Stream A)
+#   5. ros_gz_image bridge — gz camera/image -> ROS /camera/image (critical path for Stream C)
+#   6. task_node         — kitting state machine + nominal trajectory publisher (Stream E)
+#   7. human_node        — ground-truth operator model, broadcasts world->human_gt TF (Stream E)
+#   8. motion_node       — fuses nominal trajectory * safety scale, commands arm (Stream D)
+#
+# What is a placeholder (not yet on main — see PLACEHOLDER blocks below):
+#   * perception_node    — Stream C (perception); needs perception_node.py + setup.py entry_point
+#   * safety_monitor     — Stream F (safety loop closure); needs safety_monitor.py + setup.py entry_point
+#
+# headless:=true is required by CI (§7 integration and package stages).  See §8:
+#   ros2 launch safecollab cell.launch.py headless:=true
+#
+# Standard interactive run (requires a display):
+#   ros2 launch safecollab cell.launch.py
+#
+# Quick introspection after launch:
+#   ros2 control list_controllers          # joint_state_broadcaster + arm_controller active
+#   ros2 run tf2_tools view_frames         # world->tcp chain and world->human_gt
+#   ros2 topic hz /camera/image            # ~30 Hz from the gz camera bridge
+#   ros2 topic echo /task/state            # kitting SM state
+#   ros2 topic echo /motion/nominal_trajectory  # trajectory from task_node
+#
+# Reference: _stream_a_smoke_test.launch.py was the provisional scaffold this file replaces.
+# It is kept for Stream A's own smoke-test verification and is not run by CI.
+
+from launch import LaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    RegisterEventHandler,
+)
+from launch.conditions import IfCondition, UnlessCondition
+from launch.event_handlers import OnProcessExit
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import (
+    Command,
+    FindExecutable,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
+from launch_ros.actions import Node
+from launch_ros.descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
+
+
+def generate_launch_description():
+    # ------------------------------------------------------------------
+    # Launch arguments
+    # ------------------------------------------------------------------
+
+    headless_arg = DeclareLaunchArgument(
+        "headless",
+        default_value="false",
+        description=(
+            "Run gz sim in headless (server-only, no GUI) mode. "
+            "Set to true for CI, Docker without a display, or launch_test (§7)."
+        ),
+    )
+    headless = LaunchConfiguration("headless")
+
+    # ------------------------------------------------------------------
+    # Gazebo simulation — §6 item 1 prerequisite
+    # Two variants, exactly one runs per invocation (IfCondition / UnlessCondition).
+    #   headless=true  -> -s  server-only, no GUI window; safe for CI / Xvfb-less Docker
+    #   headless=false -> server + GUI client (default for interactive development)
+    # Both use -r (run immediately, not paused) to match the smoke-test invocation.
+    # ------------------------------------------------------------------
+
+    gz_sim_launch = PathJoinSubstitution(
+        [FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"]
+    )
+
+    gz_server = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(gz_sim_launch),
+        launch_arguments={"gz_args": "-s -r empty.sdf"}.items(),
+        condition=IfCondition(headless),
+    )
+
+    gz_full = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(gz_sim_launch),
+        launch_arguments={"gz_args": "-r empty.sdf"}.items(),
+        condition=UnlessCondition(headless),
+    )
+
+    # ------------------------------------------------------------------
+    # robot_state_publisher — §6 item 1
+    # Parameterised with Command(['xacro ', cell_xacro]) exactly as documented in §6
+    # and as the smoke test (_stream_a_smoke_test.launch.py) already verified works.
+    # ------------------------------------------------------------------
+
+    pkg = FindPackageShare("safecollab")
+
+    cell_xacro = PathJoinSubstitution([pkg, "urdf", "cell.xacro"])
+    robot_description = {
+        "robot_description": ParameterValue(
+            Command([FindExecutable(name="xacro"), " ", cell_xacro]),
+            value_type=str,
+        )
+    }
+
+    robot_state_publisher = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        output="screen",
+        parameters=[robot_description, {"use_sim_time": True}],
+    )
+
+    # ------------------------------------------------------------------
+    # ros_gz_sim create — §6 item 2 (spawn)
+    # Spawns the model from the /robot_description topic into the running gz server.
+    # The model name matches the robot element in cell.xacro: name="safecollab_cell".
+    # ------------------------------------------------------------------
+
+    spawn = Node(
+        package="ros_gz_sim",
+        executable="create",
+        output="screen",
+        arguments=["-topic", "robot_description", "-name", "safecollab_cell"],
+    )
+
+    # ------------------------------------------------------------------
+    # Controller spawners — §6 item 3
+    # Ordered via OnProcessExit to guarantee the gz_ros2_control controller_manager
+    # (started by the GazeboSimROS2ControlPlugin in cell.xacro) is already running
+    # before we try to load controllers.  Chain: spawn -> jsb_spawner -> arm_spawner.
+    # Config is in config/controllers.yaml (§5) loaded by the gz plugin.
+    # ------------------------------------------------------------------
+
+    jsb_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["joint_state_broadcaster"],
+        output="screen",
+    )
+
+    arm_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["arm_controller"],
+        output="screen",
+    )
+
+    # ------------------------------------------------------------------
+    # ros_gz_image bridge — §6 item 4 (camera)
+    # The gz camera sensor in cell.xacro publishes on gz topic 'camera/image'
+    # (set via <topic>camera/image</topic> in urdf/cell.xacro, line ~143).
+    # The ros_gz_image image_bridge maps:
+    #   gz transport topic:  camera/image
+    #   ROS 2 topic:        /camera/image   (sensor_msgs/Image, best-effort, §3 contract)
+    #
+    # This is the specific piece blocking Stream C live perception wiring:
+    # perception_node subscribes /camera/image; without this bridge the topic is dead.
+    # ------------------------------------------------------------------
+
+    camera_bridge = Node(
+        package="ros_gz_image",
+        executable="image_bridge",
+        arguments=["camera/image"],
+        output="screen",
+    )
+
+    # ------------------------------------------------------------------
+    # Application nodes — §6 item 5
+    # Nodes present on main (v0.2.0) are launched directly.
+    # Nodes not yet on main are left as clearly commented PLACEHOLDER blocks —
+    # NOT silently broken references (per §6 ownership note).
+    # ------------------------------------------------------------------
+
+    # Stream E: task_node — owns the kitting state machine (GO_TO_BIN -> PICK -> ...),
+    # publishes /motion/nominal_trajectory (JointTrajectory) and /task/state (String).
+    task_node = Node(
+        package="safecollab",
+        executable="task_node",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+    )
+
+    # Stream E: human_node — drives the simulated operator along randomisable paths
+    # including tray-reaches (FR-11 / AT-6).  Broadcasts world->human_gt TF
+    # (ground truth, sim-internal; never consumed by the safety loop per §3).
+    human_node = Node(
+        package="safecollab",
+        executable="human_node",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+    )
+
+    # Stream D: motion_node — fuses nominal trajectory * /safety/scale, re-times
+    # trajectory points (retime()), handles protective stop (scale==0) and clean
+    # resume. Publishes /arm_controller/joint_trajectory.
+    motion_node = Node(
+        package="safecollab",
+        executable="motion_node",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+    )
+
+    # ---- PLACEHOLDER: Stream C — perception_node (NOT YET ON MAIN) ---------------
+    #
+    # When Stream C is merged:
+    #   1. Uncomment the Node block below.
+    #   2. Add 'perception_node = safecollab.perception_node:main' to entry_points
+    #      in setup.py (owned by Stream C — do not add here).
+    #   3. Add perception_node to the LaunchDescription list at the bottom.
+    #
+    # Node role: subscribes /camera/image -> classical CV -> broadcasts world->human
+    # TF (perceived, not ground truth) + publishes /human/uncertainty (Float32, σ m).
+    # Loss timeout -> publishes "lost" state to trigger the safety fail-safe (FR-9).
+    #
+    # perception_node = Node(
+    #     package="safecollab",
+    #     executable="perception_node",
+    #     output="screen",
+    #     parameters=[{"use_sim_time": True}],
+    # )
+    # -------------------------------------------------------------------------------
+
+    # ---- PLACEHOLDER: Stream F — safety_monitor (NOT YET ON MAIN) ----------------
+    #
+    # When Stream F is merged:
+    #   1. Uncomment the Node block below.
+    #   2. Add 'safety_monitor = safecollab.safety_monitor:main' to entry_points
+    #      in setup.py (owned by Stream F — do not add here).
+    #   3. Add config/safety.yaml to data_files in setup.py (Stream F also owns this).
+    #   4. Add safety_monitor to the LaunchDescription list at the bottom.
+    #
+    # Node role: reads world->human TF + /human/uncertainty (σ), computes min
+    # separation over robot frames (TCP, wrist, elbow), calls safety_logic.classify()
+    # -> publishes /safety/scale (Float32 0.0-1.0) + /safety/zone (String green|yellow|red|lost).
+    # Fail-safe: stops the arm if perception is lost/stale (FR-9 / AT-5).
+    #
+    # safety_monitor = Node(
+    #     package="safecollab",
+    #     executable="safety_monitor",
+    #     output="screen",
+    #     parameters=[{"use_sim_time": True}],
+    # )
+    # -------------------------------------------------------------------------------
+
+    return LaunchDescription(
+        [
+            headless_arg,
+            # gz sim: exactly one of these two runs depending on headless argument
+            gz_server,  # headless=true  -> server-only (CI / no display)
+            gz_full,  # headless=false -> server + GUI (interactive)
+            robot_state_publisher,
+            spawn,
+            # controllers are ordered: spawn -> jsb_spawner -> arm_spawner
+            RegisterEventHandler(
+                OnProcessExit(target_action=spawn, on_exit=[jsb_spawner])
+            ),
+            RegisterEventHandler(
+                OnProcessExit(target_action=jsb_spawner, on_exit=[arm_spawner])
+            ),
+            camera_bridge,
+            # --- application nodes (present on main) ---
+            task_node,
+            human_node,
+            motion_node,
+            # perception_node,  # Stream C — NOT YET ON MAIN (see PLACEHOLDER above)
+            # safety_monitor,   # Stream F — NOT YET ON MAIN (see PLACEHOLDER above)
+        ]
+    )
