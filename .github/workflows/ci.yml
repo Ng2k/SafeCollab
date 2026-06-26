@@ -9,6 +9,9 @@
 #
 # 2026-06-26: bumped actions/checkout, actions/setup-python, actions/upload-artifact
 # from v4/v5 to v6 (Node.js 24 native; v4/v5 ran on the now-deprecated Node.js 20).
+# 2026-06-26: unit job now installs from root requirements.txt (+ editable
+# safecollab install) instead of a hand-picked apt package list — the apt-only
+# install missed opencv-python once Stream C's perception_node.py landed.
 ---
 name: CI
 
@@ -89,11 +92,17 @@ jobs:
                  " gate is wired and will enforce >= 90% once Stream B lands."
             exit 0
           fi
-          apt-get update && apt-get install -y --no-install-recommends \
-            python3-pytest python3-pytest-cov
+          apt-get update && apt-get install -y --no-install-recommends python3-pip
+          # Install from the SAME root requirements.txt every local .venv uses
+          # (AGENTS.md ground rule 9) — keeps CI and local dev on one source of
+          # truth instead of re-deriving an apt package list by hand.
+          python3 -m pip install --no-cache-dir --break-system-packages -r requirements.txt
           source /opt/ros/${ROS_DISTRO}/setup.bash
           colcon build --symlink-install
           source install/setup.bash
+          # The safecollab package itself, editable (ground rule 9, step 2) —
+          # required for `from safecollab.x import y` to resolve.
+          python3 -m pip install --no-cache-dir --break-system-packages -e src/safecollab
           pytest src/safecollab/test/unit \
             --cov=safecollab --cov-report=term-missing --cov-fail-under=90
 
