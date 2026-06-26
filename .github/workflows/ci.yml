@@ -136,9 +136,18 @@ jobs:
                  " harness is wired and ready (Stream A)."
             exit 0
           fi
+          # Same application dependency set as the Dockerfile (AGENTS.md §8) —
+          # cell.launch.py needs ros_gz_sim/gz_ros2_control to come up, not
+          # just the launch_testing framework itself.
           apt-get update && apt-get install -y --no-install-recommends \
             ros-${ROS_DISTRO}-launch-testing \
-            ros-${ROS_DISTRO}-launch-testing-ros
+            ros-${ROS_DISTRO}-launch-testing-ros \
+            ros-${ROS_DISTRO}-ros-gz-sim \
+            ros-${ROS_DISTRO}-gz-ros2-control \
+            ros-${ROS_DISTRO}-ros2-control \
+            ros-${ROS_DISTRO}-ros2-controllers \
+            ros-${ROS_DISTRO}-joint-trajectory-controller \
+            python3-opencv
           source /opt/ros/${ROS_DISTRO}/setup.bash
           colcon build --symlink-install
           source install/setup.bash
