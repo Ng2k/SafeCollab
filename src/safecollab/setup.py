@@ -12,8 +12,16 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        # launch files — required so FindPackageShare('safecollab') resolves them
-        # after `colcon build`.  Added by Stream G (cell.launch.py ownership, §6).
+        # urdf/xacro files -- required so FindPackageShare('safecollab') resolves
+        # cell.xacro / arm.xacro after `colcon build`
+        (os.path.join("share", package_name, "urdf"), glob("urdf/*.xacro")),
+        # config files (controllers/risk/safety yaml + view.rviz) -- same reason.
+        (
+            os.path.join("share", package_name, "config"),
+            glob("config/*.yaml") + glob("config/*.rviz"),
+        ),
+        # launch files -- required so FindPackageShare('safecollab') resolves them
+        # after `colcon build`.
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
     ],
     install_requires=["setuptools"],
