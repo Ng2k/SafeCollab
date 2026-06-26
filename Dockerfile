@@ -38,15 +38,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-opencv \
         python3-pytest \
         python3-pytest-cov \
-        python3-gz-transport13 \
-        python3-gz-msgs10 \
     && rm -rf /var/lib/apt/lists/*
-# python3-gz-transport13 / python3-gz-msgs10: gz Harmonic Python bindings for
-# gz-transport 13 and gz-msgs 10 (Ubuntu 24.04, OSRF apt repo). Required by
-# human_node._set_gz_pose() to move the yellow operator visual body via the
-# gz transport /world/empty/set_pose service at 10 Hz.  The import is guarded
-# with try/except in human_node.py so the node still runs if these packages
-# are unavailable (visual body stays at spawn position; TF broadcast unaffected).
+# NOTE: the gz-transport Python bindings (gz.transport13 / gz.msgs10) are NOT
+# available in the ROS 2 apt repo that this base image ships — they live in the
+# separate OSRF (packages.osrfoundation.org) repo. human_node._set_gz_pose()
+# imports them under a guarded try/except, so without them the yellow operator
+# body simply stays at its spawn position (still visible; world->human_gt TF and
+# the ground-truth safety path are unaffected). Live pose-following needs a
+# validated in-image mechanism — see the TODO in human_node.py.
 
 # Colcon workspace root. The repository root *is* the workspace: packages live
 # under ./src (see AGENTS.md §5), so COPY . places them at ${ROS_WS}/src.
