@@ -8,6 +8,8 @@ FROM ros:jazzy-ros-base
 #   - gz-ros2-control ................ gz <-> ros2_control bridge
 #   - ros2-control / ros2-controllers  the control stack
 #   - joint-trajectory-controller .... arm controller used by motion_node
+#   - xacro .......................... expands cell.xacro for robot_state_publisher
+#   - robot-state-publisher .......... publishes robot_description / TF in cell.launch.py
 #   - python3-opencv ................. classical CV for perception_node
 #   - python3-pytest(-cov) ........... unit test + coverage gate (>= 90%)
 # ---------------------------------------------------------------------------
@@ -17,6 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ros2-control \
         ros-jazzy-ros2-controllers \
         ros-jazzy-joint-trajectory-controller \
+        ros-jazzy-xacro \
+        ros-jazzy-robot-state-publisher \
         python3-opencv \
         python3-pytest \
         python3-pytest-cov \

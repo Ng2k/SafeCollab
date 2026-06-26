@@ -147,6 +147,8 @@ jobs:
             ros-${ROS_DISTRO}-ros2-control \
             ros-${ROS_DISTRO}-ros2-controllers \
             ros-${ROS_DISTRO}-joint-trajectory-controller \
+            ros-${ROS_DISTRO}-xacro \
+            ros-${ROS_DISTRO}-robot-state-publisher \
             python3-opencv
           source /opt/ros/${ROS_DISTRO}/setup.bash
           colcon build --symlink-install
