@@ -96,7 +96,12 @@ jobs:
           # Install from the SAME root requirements.txt every local .venv uses
           # (AGENTS.md ground rule 9) — keeps CI and local dev on one source of
           # truth instead of re-deriving an apt package list by hand.
-          python3 -m pip install --no-cache-dir --break-system-packages -r requirements.txt
+          # --ignore-installed: some deps (e.g. pluggy, a pytest dependency) are
+          # already present via apt/dpkg in this base image; pip can't safely
+          # uninstall a dpkg-managed package (no RECORD file), so we tell it to
+          # install into its own namespace instead of trying to replace those.
+          python3 -m pip install --no-cache-dir --break-system-packages --ignore-installed \
+            -r requirements.txt
           source /opt/ros/${ROS_DISTRO}/setup.bash
           colcon build --symlink-install
           source install/setup.bash
