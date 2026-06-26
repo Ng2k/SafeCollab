@@ -17,71 +17,63 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
-### Fixed
-- fix(risk): correct the ISO/TS 15066 worked example — the original `d_red ≈ 0.35 m` target was
-  mathematically unreachable with `v_h = 1.6 m/s` (the human term `S_H` alone already exceeds it).
-  Thresholds recomputed by varying both `v_R` and `T_s` together between the full-speed and
-  reduced-speed scenarios (a slower robot also stops faster), yielding the physically consistent
-  `d_yellow ≈ 0.84 m` / `d_red ≈ 0.43 m`. `risk.yaml` restructured into `full_speed` / `reduced`
-  blocks accordingly. Also fixes a doc/code mismatch: the red-zone edge is **inclusive**
-  (`d ≤ d_red`), matching `safety_logic.classify()`.
-
 ### Added
+
 - _(work in progress toward the next tag)_
-
----
-
-## [0.4.0] - 2026-07-04 — P3: safety loop closed
-
-### Added
-- feat(safety): close the loop — perceived pose → minimum separation → risk zone → speed scale.
-- feat(safety): protective stop on red-zone breach and clean resume on retreat (re-plan from current state).
-- feat(safety): fail-safe — enter `lost` and stop when perception is lost/stale; resume on re-acquire.
-
-### Fixed
-- fix(motion): guard `scale == 0.0` to avoid a division-by-zero in `retime()`.
-
-**Artifact:** `safecollab-v0.4.0.tar.gz` (published on the repo Releases page).
-
----
-
-## [0.3.0] - 2026-07-02 — P2: perception
-
-### Added
-- feat(perception): `perception_node` detects the operator from the simulated camera and
-  broadcasts the perceived `human` TF.
-- feat(perception): publish `/human/uncertainty` (σ); larger σ widens the risk thresholds (`Z_d`).
-- feat(perception): loss-timeout detection feeding the safety layer's `lost` state.
-
-### Changed
-- The safety loop now consumes the **perceived** operator pose instead of sim ground truth.
-
-**Artifact:** `safecollab-v0.3.0.tar.gz`.
-
----
-
-## [0.2.0] - 2026-06-28 — P1: kitting loop
-
-### Added
-- feat(task): kitting state machine `GO_TO_BIN → PICK → GO_TO_TRAY → DROP` driving the arm under
-  `joint_trajectory_controller` at full speed.
-- feat(sim): `human_node` operator model moves through the workspace and reaches into the shared tray.
-
-**Artifact:** `safecollab-v0.2.0.tar.gz`.
 
 ---
 
 ## [0.1.0] - 2026-06-25 — P0: foundation + CI
 
 ### Added
-- feat(safety): `safety_logic.classify()` with green/yellow/red zones and the fail-safe-on-`None`
-  contract (written test-first).
-- feat(risk): `risk.py` ISO/TS 15066 `S_p` model; thresholds computed from `config/risk.yaml`.
-- feat(motion): `retime()` trajectory speed-scaling with a `scale == 0` guard.
-- feat(ci): Dockerfile, `entrypoint.sh`, GitHub Actions pipeline (lint → build → unit+coverage →
-  integration → package → deliver), pre-commit hooks, **≥ 90 % coverage gate** on safety & risk.
 
-**Artifact:** `safecollab-v0.1.0.tar.gz`.
+- feat(safety): `safety_logic.classify()` with green/yellow/red/lost zones and the
+  fail-safe-on-`None` contract, written test-first; boundary semantics locked by test
+  (yellow edge exclusive, red edge **inclusive** — `d ≤ d_red`).
+- feat(risk): `risk.py` ISO/TS 15066 `S_p` protective-separation model; thresholds computed at
+  start-up from `config/risk.yaml` (`full_speed` / `reduced` scenarios), not hard-coded.
+- feat(motion): `retime()` trajectory speed-scaling with an explicit `scale == 0.0` guard
+  (protective stop, no division-by-zero).
+- feat(sim): 6-DOF arm (`arm.xacro`) and the kitting-cell world (`cell.xacro`) — work table, two
+  feeder bins, the shared kitting tray, and a down-looking camera sensor — wired to
+  `gz_ros2_control` / `GazeboSimROS2ControlPlugin`.
+- feat(sim): `controllers.yaml` (`joint_state_broadcaster` + `arm_controller` /
+  `joint_trajectory_controller`) and a debug `view.rviz`.
+- feat(ci): Dockerfile (`ros:jazzy-ros-base` + the project's apt/pip dependency set),
+  `entrypoint.sh`, and the GitHub Actions pipeline — six gated stages: lint → build →
+  unit (+coverage) → integration → package → deliver.
+- feat(ci): pre-commit hooks — ruff (lint + format), yamllint, Conventional Commits, and a
+  block on AI-attribution trailers (ground rule 7) — installed and verified end to end.
+- feat(packaging): minimal `ament_python` `setup.py` / `package.xml` / `resource/safecollab`,
+  making `safecollab` an installable package (`pip install -e src/safecollab`) and resolving the
+  `safecollab.*` imports used by every unit test.
+
+### Changed
+
+- The `risk.yaml` config model was restructured mid-stream: each speed scenario now carries its
+  own `v_r` **and** `t_s` (a slower robot also stops faster), replacing an earlier draft that
+  scaled `v_r` alone — this is what makes `d_yellow ≈ 0.84 m` / `d_red ≈ 0.43 m` physically
+  reachable from the ISO/TS 15066 model rather than an arbitrary pair of constants.
+- Stream B's modules were relocated from a root-level `safecollab/` to `src/safecollab/safecollab/`
+  to match the package layout, alongside its config and tests.
+
+### Fixed
+
+- fix(risk): correct the ISO/TS 15066 worked example — the original `d_red ≈ 0.35 m` target was
+  mathematically unreachable with `v_h = 1.6 m/s` (the human term `S_H` alone already exceeds it).
+  Thresholds recomputed by varying both `v_R` and `T_s` together between the full-speed and
+  reduced-speed scenarios, yielding the physically consistent `d_yellow ≈ 0.84 m` /
+  `d_red ≈ 0.43 m`.
+- style: applied `ruff format` and fixed `yamllint` colon-spacing / comment-indentation issues in
+  modules and config written before the lint hooks existed (Stream B's first pass predated
+  Stream G's `.pre-commit-config.yaml`).
+
+**Verification:** 27/27 unit tests passing; 100% coverage on `safety_logic.py`, `risk.py`,
+`retime.py` (gate: ≥ 90%); `gz sim` spawn, `arm_controller` + `joint_state_broadcaster` active,
+and a clean `world → … → tcp` / `world → … → camera_optical_frame` TF tree all verified live in
+the `ros:jazzy-ros-base` container.
+
+**Artifact:** `safecollab-v0.1.0.tar.gz` (published on the repo Releases page).
 
 ---
 
@@ -89,7 +81,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 | Tag | Phase | Theme |
 |---|---|---|
-| `v0.1.0` | P0 | Foundation + CI; pure safety/risk core (TDD) |
+| ~~`v0.1.0`~~ | P0 | ~~Foundation + CI; pure safety/risk core (TDD)~~ — **released above** |
 | `v0.2.0` | P1 | Collaborative kitting loop |
 | `v0.3.0` | P2 | Perception-driven human (TF + uncertainty) |
 | `v0.4.0` | P3 | Safety loop closed (zones, stop, resume, fail-safe) |
@@ -98,10 +90,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 | `v0.7.0` | P6 | Documentation (README, diagrams, risk note) |
 | **`v1.0.0`** | **submission** | **Acceptance AT-1…AT-5 passing; final image artifact + notes** |
 
-Patch releases (`v0.x.Y`) carry bug-fixes between the minor milestones above.
-
-[Unreleased]: https://github.com/<owner>/safecollab/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/<owner>/safecollab/releases/tag/v0.4.0
-[0.3.0]: https://github.com/<owner>/safecollab/releases/tag/v0.3.0
-[0.2.0]: https://github.com/<owner>/safecollab/releases/tag/v0.2.0
+[Unreleased]: https://github.com/<owner>/safecollab/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/<owner>/safecollab/releases/tag/v0.1.0
