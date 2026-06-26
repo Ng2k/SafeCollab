@@ -23,6 +23,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ---
 
+## [0.2.0] - 2026-06-26 — P1: kitting loop + motion layer
+
+### Added
+
+- feat(motion): `motion_node` — fuses the nominal trajectory with `/safety/scale` via the
+  existing `retime()`, split into `MotionLogic` (pure Python, fully unit-testable) and
+  `MotionNode` (the ROS wrapper). Protective stop on `scale == 0.0` (no command published, no
+  division-by-zero). Clean resume re-plans from the current joint state as the first waypoint at
+  `t=0`, avoiding a jerk on resume.
+- feat(task): `task_node` — `KittingStateMachine` driving the
+  `GO_TO_BIN → PICK → GO_TO_TRAY → DROP` cycle, alternating between the two feeder bins, with
+  per-leg trajectories respecting joint limits. Never reasons about safety zones (kept
+  orthogonal to the safety loop, per §3/§5.9).
+- feat(sim): `human_node` — `OperatorModel` with randomised operator paths; every generated path
+  is guaranteed to include a tray-reach (FR-11, AT-6).
+- feat(packaging): `motion_node`, `task_node`, and `human_node` registered as console-script
+  entry points in `setup.py`.
+
+### Changed
+
+- The ground-truth operator TF is broadcast as **`human_gt`**, kept distinct from the perceived
+  `human` TF that `perception_node`/`safety_monitor` will use — `human_gt` is sim-internal only
+  and is never consumed by the safety loop. This convention is now fixed in `AGENTS.md` §3.
+
+**Verification:** 132/132 unit tests passing (27 safety/risk core + 29 motion + 36 task +
+40 human), 100% coverage on safety/risk/motion modules (gate: ≥ 90%); full CI pipeline (lint,
+build, unit+coverage, integration, package, deliver) green on GitHub Actions.
+
+**Known follow-ups (tracked, not blocking):** the post-resume waypoint timing is conservative
+(lands at `t=2T` rather than `t=T`) and may be tuned once live behaviour is observed in
+simulation; the kitting state machine's joint configurations are geometric approximations
+pending IK verification once Stream A's cell is fully integrated with the application nodes.
+
+**Artifact:** `safecollab-v0.2.0.tar.gz` (published on the repo Releases page).
+
+---
+
 ## [0.1.0] - 2026-06-25 — P0: foundation + CI
 
 ### Added
@@ -82,7 +119,7 @@ the `ros:jazzy-ros-base` container.
 | Tag | Phase | Theme |
 |---|---|---|
 | ~~`v0.1.0`~~ | P0 | ~~Foundation + CI; pure safety/risk core (TDD)~~ — **released above** |
-| `v0.2.0` | P1 | Collaborative kitting loop |
+| ~~`v0.2.0`~~ | P1 | ~~Collaborative kitting loop~~ — **released above (+ motion layer)** |
 | `v0.3.0` | P2 | Perception-driven human (TF + uncertainty) |
 | `v0.4.0` | P3 | Safety loop closed (zones, stop, resume, fail-safe) |
 | `v0.5.0` | P4 | Robustness (randomised paths, recovery, edge cases) |
@@ -90,5 +127,6 @@ the `ros:jazzy-ros-base` container.
 | `v0.7.0` | P6 | Documentation (README, diagrams, risk note) |
 | **`v1.0.0`** | **submission** | **Acceptance AT-1…AT-5 passing; final image artifact + notes** |
 
-[Unreleased]: https://github.com/<owner>/safecollab/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/<owner>/safecollab/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/<owner>/safecollab/releases/tag/v0.2.0
 [0.1.0]: https://github.com/<owner>/safecollab/releases/tag/v0.1.0
