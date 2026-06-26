@@ -98,7 +98,7 @@ class TestLoadSafetyConfig:
         assert len(safety_cfg.robot_frames) > 0
 
     def test_robot_frames_contains_expected_names(self, safety_cfg):
-        for expected in ("tcp", "wrist", "elbow"):
+        for expected in ("tcp", "link_6", "link_3"):
             assert expected in safety_cfg.robot_frames
 
     def test_marker_radius_is_positive(self, safety_cfg):
@@ -463,9 +463,9 @@ class TestComputeUncertainty:
             human_xyz_or_none=(0.50, 0.0, 0.0),
             uncertainty=0.05,  # z_d=0.05 → d_red=0.43
         )
-        assert zone_low == "yellow", (
-            "at d=0.50, z_d=0.05 the zone should be yellow " f"(got {zone_low!r})"
-        )
+        assert (
+            zone_low == "yellow"
+        ), f"at d=0.50, z_d=0.05 the zone should be yellow (got {zone_low!r})"
 
         # High uncertainty: z_d=0.15 → d_red grows above 0.50 → zone becomes red
         # d_red(z_d=0.15) = 1.6*(0.10+0.02) + 0.10*0.10 + 0.06 + 0.10 + 0.15 + 0.02
@@ -475,9 +475,9 @@ class TestComputeUncertainty:
             human_xyz_or_none=(0.50, 0.0, 0.0),
             uncertainty=0.15,  # z_d=0.15 → d_red=0.53 > 0.50
         )
-        assert zone_high == "red", (
-            "at d=0.50, z_d=0.15 the zone should be red " f"(got {zone_high!r})"
-        )
+        assert (
+            zone_high == "red"
+        ), f"at d=0.50, z_d=0.15 the zone should be red (got {zone_high!r})"
 
     def test_uncertainty_zero_gives_tightest_thresholds(self, risk_cfg):
         # σ=0 → smallest d_red and d_yellow (strictest case with known geometry)
