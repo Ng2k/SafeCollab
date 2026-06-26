@@ -170,6 +170,24 @@ def generate_launch_description():
     )
 
     # ------------------------------------------------------------------
+    # ros_gz_bridge /clock bridge — simulation time
+    # gz sim publishes the simulation clock on the gz transport topic 'clock';
+    # without bridging it to the ROS '/clock' topic, every node started with
+    # use_sim_time:=true (the controllers, task/human/motion_node) has no clock
+    # source. The controller_manager then logs "No clock received, using time
+    # argument instead!" every cycle, and ROS-side sim time never advances.
+    # This one-way (gz -> ROS) bridge publishes /clock so all nodes share sim
+    # time. Direction token '[' = gz -> ROS only (see ros_gz_bridge README).
+    # ------------------------------------------------------------------
+
+    clock_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        arguments=["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
+        output="screen",
+    )
+
+    # ------------------------------------------------------------------
     # Application nodes — §6 item 5
     # Nodes present on main (v0.2.0) are launched directly.
     # Nodes not yet on main are left as clearly commented PLACEHOLDER blocks —
@@ -253,6 +271,9 @@ def generate_launch_description():
             # gz sim: exactly one of these two runs depending on headless argument
             gz_server,  # headless=true  -> server-only (CI / no display)
             gz_full,  # headless=false -> server + GUI (interactive)
+            # /clock bridge first: sim time must be available before the
+            # controllers and use_sim_time nodes start, or they warn every cycle.
+            clock_bridge,
             robot_state_publisher,
             spawn,
             # controllers are ordered: spawn -> jsb_spawner -> arm_spawner
