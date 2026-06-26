@@ -611,6 +611,11 @@ def main(args: list | None = None) -> None:  # pragma: no cover
     node = PerceptionNode()
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # On SIGINT, rclpy's default signal handler already shuts the context
+        # down; calling rclpy.shutdown() again raises RCLError. Guard with ok().
+        if rclpy.ok():
+            rclpy.shutdown()

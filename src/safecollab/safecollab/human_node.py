@@ -367,9 +367,14 @@ def main(args=None):  # pragma: no cover
     node = HumanNode()
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # On SIGINT, rclpy's default signal handler already shuts the context
+        # down; calling rclpy.shutdown() again raises RCLError. Guard with ok().
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":  # pragma: no cover
