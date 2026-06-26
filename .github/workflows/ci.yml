@@ -143,6 +143,7 @@ jobs:
             ros-${ROS_DISTRO}-launch-testing \
             ros-${ROS_DISTRO}-launch-testing-ros \
             ros-${ROS_DISTRO}-ros-gz-sim \
+            ros-${ROS_DISTRO}-ros-gz-image \
             ros-${ROS_DISTRO}-gz-ros2-control \
             ros-${ROS_DISTRO}-ros2-control \
             ros-${ROS_DISTRO}-ros2-controllers \

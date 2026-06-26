@@ -5,6 +5,7 @@ FROM ros:jazzy-ros-base
 # ---------------------------------------------------------------------------
 # System & ROS dependencies (AGENTS.md §8)
 #   - ros-gz-sim ..................... Gazebo (gz) simulation
+#   - ros-gz-image ................... gz <-> ros2 camera/image bridge (perception)
 #   - gz-ros2-control ................ gz <-> ros2_control bridge
 #   - ros2-control / ros2-controllers  the control stack
 #   - joint-trajectory-controller .... arm controller used by motion_node
@@ -15,6 +16,7 @@ FROM ros:jazzy-ros-base
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ros-gz-sim \
+        ros-jazzy-ros-gz-image \
         ros-jazzy-gz-ros2-control \
         ros-jazzy-ros2-control \
         ros-jazzy-ros2-controllers \
