@@ -146,7 +146,9 @@ jobs:
           docker build -t safecollab:ci .
           # entrypoint.sh sources /opt/ros/jazzy + the overlay, then exec's this.
           # WORKDIR in the image is the workspace root, so the test path resolves.
-          docker run --rm safecollab:ci \
+          # --init: tini as PID 1 reaps gz's ruby children and forwards signals,
+          # so teardown is clean (without it PID 1 ignores unhandled signals).
+          docker run --rm --init safecollab:ci \
             launch_test src/safecollab/test/integration/test_bringup.py
 
   # 5) PACKAGE — build the deploy image; verify it launches headless (§7.5).
@@ -162,7 +164,12 @@ jobs:
       - name: Smoke test — headless cell launch (when present)
         run: |
           if [ -f "${CELL_LAUNCH}" ]; then
-            timeout 60 docker run --rm safecollab:ci \
+            # --init runs tini as PID 1 so the SIGTERM that `timeout` delivers is
+            # forwarded to `ros2 launch` and the cell shuts down. Without it the
+            # launch runs as PID 1, which ignores unhandled signals, so the
+            # container never stops and the step hangs past the 60 s budget.
+            # --kill-after=20 is the SIGKILL backstop if gz is slow to exit.
+            timeout --kill-after=20 60 docker run --rm --init safecollab:ci \
               ros2 launch safecollab cell.launch.py headless:=true || code=$?
             # 124 = timeout reached = cell came up and kept running (success).
             if [ "${code:-0}" -ne 0 ] && [ "${code:-0}" -ne 124 ]; then
