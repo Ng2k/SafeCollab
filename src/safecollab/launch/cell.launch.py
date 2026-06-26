@@ -69,6 +69,18 @@ def generate_launch_description():
     )
     headless = LaunchConfiguration("headless")
 
+    safety_source_arg = DeclareLaunchArgument(
+        "safety_source",
+        default_value="perceived",
+        description=(
+            "TF frame source for the safety loop (AGENTS.md §11 cut-scope fallback #4). "
+            "'perceived' (default): world→human from perception_node — headline demo path. "
+            "'ground_truth': world→human_gt from human_node — fallback when perception "
+            "is unavailable, so the SSM ramp/stop/resume/fail-safe can be demonstrated."
+        ),
+    )
+    safety_source = LaunchConfiguration("safety_source")
+
     # ------------------------------------------------------------------
     # Gazebo simulation — §6 item 1 prerequisite
     # Two variants, exactly one runs per invocation (IfCondition / UnlessCondition).
@@ -256,12 +268,13 @@ def generate_launch_description():
         package="safecollab",
         executable="safety_monitor",
         output="screen",
-        parameters=[{"use_sim_time": True}],
+        parameters=[{"use_sim_time": True, "safety_source": safety_source}],
     )
 
     return LaunchDescription(
         [
             headless_arg,
+            safety_source_arg,
             # gz sim: exactly one of these two runs depending on headless argument
             gz_server,  # headless=true  -> server-only (CI / no display)
             gz_full,  # headless=false -> server + GUI (interactive)
