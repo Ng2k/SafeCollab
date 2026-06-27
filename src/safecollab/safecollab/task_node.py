@@ -26,8 +26,12 @@ Cell geometry (world frame, metres) — from ``urdf/cell.xacro``
 * ``kitting_tray`` centre: table_top + (0.35, 0, 0.02) → world (0.35, 0, 0.76)
 * Arm base     : table_top + (-0.10, 0, 0) → world (-0.10, 0, 0.74)
 
-Joint-space configurations are approximate (planning-level waypoints); exact
-IK solutions require a live robot or an offline solver not available here.
+Joint-space configurations are FK-verified to place the TCP at the workspace
+targets (tray / bins at table height, z ≈ 0.80 m), solved offline against the
+arm.xacro kinematic chain.  This matters for safety as well as fidelity: if the
+arm never descends into the shared tray, no robot frame ever comes within the
+red-zone separation of an operator reaching that tray, and the cell could never
+demonstrate a protective stop (AT-3, a §9 "never cut" acceptance test).
 """
 
 from __future__ import annotations
@@ -50,21 +54,25 @@ JOINT_NAMES: tuple[str, ...] = (
     "wrist_3_joint",
 )
 
-# Approximate joint-space configurations for the kitting cell.
-# Values: (pan, lift, elbow, wrist1, wrist2, wrist3) in radians.
+# Joint-space configurations for the kitting cell, FK-verified against the
+# arm.xacro chain (see module docstring).  Values: (pan, lift, elbow, wrist1,
+# wrist2, wrist3) in radians.
 # Geometric rationale:
-#   bin_left  is ~128° CCW from arm +x → shoulder_pan ≈ +2.2 rad
-#   bin_right is ~128° CW  from arm +x → shoulder_pan ≈ -2.2 rad
+#   bin_left  is ~129° CCW from arm +x → shoulder_pan ≈ +2.25 rad
+#   bin_right is ~129° CW  from arm +x → shoulder_pan ≈ -2.25 rad
 #   kitting_tray is directly forward (+x) → shoulder_pan ≈ 0.0 rad
+#   lift/elbow/wrist solved so the TCP reaches the target at table height
+#   (*_pick / *_drop → z ≈ 0.80 m; *_above → z ≈ 1.00 m hover); the wrist points
+#   down into the tray/bin so tcp and link_6 are the lowest frames.
 #   All joint values are within the [-π, π] limits declared in arm.xacro.
 _Q: dict[str, tuple[float, ...]] = {
     "home": (0.0, -1.0, 1.5, -0.5, 0.0, 0.0),
-    "bin_left_above": (2.2, -0.5, 1.4, -0.8, 0.0, 0.0),
-    "bin_left_pick": (2.2, -0.3, 1.1, -0.8, 0.0, 0.0),
-    "bin_right_above": (-2.2, -0.5, 1.4, -0.8, 0.0, 0.0),
-    "bin_right_pick": (-2.2, -0.3, 1.1, -0.8, 0.0, 0.0),
-    "tray_above": (0.0, -0.6, 1.3, -0.7, 0.0, 0.0),
-    "tray_drop": (0.0, -0.4, 1.0, -0.5, 0.0, 0.0),
+    "bin_left_above": (2.246, 0.443, 1.517, 1.857, 0.0, 0.0),
+    "bin_left_pick": (2.246, 0.793, 1.643, 1.459, 0.0, 0.0),
+    "bin_right_above": (-2.246, 0.443, 1.517, 1.857, 0.0, 0.0),
+    "bin_right_pick": (-2.246, 0.793, 1.643, 1.459, 0.0, 0.0),
+    "tray_above": (0.0, 0.121, 1.789, 0.973, 0.0, 0.0),
+    "tray_drop": (0.0, 0.471, 1.982, 0.522, 0.0, 0.0),
 }
 
 # Nominal (full-speed) duration for each leg, in seconds.
