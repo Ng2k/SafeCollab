@@ -388,10 +388,6 @@ _CAM_HEIGHT: int = 480
 #: Default horizontal FOV for the gz camera (radians).
 _CAM_HFOV: float = 1.0472  # 60 degrees
 
-#: Derived focal length (assuming square pixels and horizontal FOV).
-_CAM_FX: float = _CAM_WIDTH / (2.0 * 1.0472 / (2.0**0.5))  # approximate
-_CAM_FX = (_CAM_WIDTH / 2.0) / ((_CAM_HFOV / 2.0) ** 0.5)  # corrected below
-
 
 def _derive_intrinsics(
     width: int = _CAM_WIDTH,
@@ -414,6 +410,156 @@ def _derive_intrinsics(
     cx = width / 2.0
     cy = height / 2.0
     return fx, fy, cx, cy
+
+
+# ---------------------------------------------------------------------------
+# Camera-to-world geometry — pure Python, no ROS, fully unit-testable
+# ---------------------------------------------------------------------------
+
+
+def cam_to_world_transform(
+    *,
+    cam_x: float = -0.45,
+    cam_y: float = 0.35,
+    cam_z: float = 1.64,
+    pitch_rad: float = 1.0,
+) -> np.ndarray:
+    """Build the camera-optical-frame → world 4×4 homogeneous transform.
+
+    Derived from the cell.xacro link chain (all joints are fixed):
+
+    .. code-block::
+
+        world
+         └─ world_to_table  xyz=(0, 0, 0.37)
+             └─ table_to_top  xyz=(0, 0, 0.37)   → table_top at z=0.74 m
+                 └─ top_to_mast  xyz=(-0.55, 0.35, 0.45)
+                     └─ mast_to_camera  xyz=(0.10, 0, 0.45) rpy=(0, 1.0, 0)
+                         └─ camera_to_optical  rpy=(-π/2, 0, -π/2)
+
+    This places ``camera_link`` at world ``(-0.45, 0.35, 1.64)`` with
+    orientation ``Ry(1.0 rad)``.  The optical frame then adds
+    ``Rz(−π/2) · Rx(−π/2)`` (URDF static/extrinsic RPY convention:
+    ``rpy=(r, p, y)`` → ``Rz(y) · Ry(p) · Rx(r)``).
+
+    Full rotation of the optical frame in world:
+
+    .. code-block::
+
+        R = Ry(pitch_rad) · Rz(−π/2) · Rx(−π/2)
+
+    Args:
+        cam_x: Camera-link x in world frame (m).  Default from xacro: −0.45.
+        cam_y: Camera-link y in world frame (m).  Default from xacro:  0.35.
+        cam_z: Camera-link z in world frame (m).  Default from xacro:  1.64.
+        pitch_rad: Camera-body pitch in radians (``mast_to_camera`` rpy y).
+                   Default 1.0 rad.
+
+    Returns:
+        4×4 ``numpy.ndarray`` (camera optical frame → world).
+    """
+    import math as _math
+
+    # Rx(−π/2): [1 0 0 / 0 0 1 / 0 −1 0]
+    Rx_neg90 = np.array(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]],
+        dtype=float,
+    )
+
+    # Rz(−π/2): [0 1 0 / −1 0 0 / 0 0 1]
+    Rz_neg90 = np.array(
+        [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        dtype=float,
+    )
+
+    # Ry(pitch_rad): camera-body pitch from mast_to_camera joint
+    cp = _math.cos(pitch_rad)
+    sp = _math.sin(pitch_rad)
+    Ry_pitch = np.array(
+        [[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]],
+        dtype=float,
+    )
+
+    # Full rotation: Ry(pitch) · Rz(−π/2) · Rx(−π/2)
+    R = Ry_pitch @ Rz_neg90 @ Rx_neg90
+
+    T = np.eye(4, dtype=float)
+    T[:3, :3] = R
+    T[0, 3] = cam_x
+    T[1, 3] = cam_y
+    T[2, 3] = cam_z
+    return T
+
+
+def project_pixel_to_plane(
+    u: float,
+    v: float,
+    intrinsics: Tuple[float, float, float, float],
+    cam_to_world: np.ndarray,
+    plane_z: float,
+) -> Optional[Tuple[float, float, float]]:
+    """Back-project a pixel to a 3-D world point on a horizontal plane.
+
+    Uses pinhole back-projection to form a ray in camera space, transforms
+    the ray into the world frame via ``cam_to_world``, then solves for the
+    intersection with the horizontal plane ``z = plane_z``.
+
+    This supersedes the old fixed-depth approach (``back_project`` +
+    ``transform_point`` with a constant depth) and correctly handles the
+    angled mast-mounted camera geometry.
+
+    The ray in camera frame is:
+
+    .. code-block::
+
+        d_cam = [(u − cx)/fx,  (v − cy)/fy,  1.0]
+
+    The world-frame parametric ray is:
+
+    .. code-block::
+
+        P(s) = t_cam  +  s · (R · d_cam)
+
+    Intersection with ``z = plane_z``:
+
+    .. code-block::
+
+        s = (plane_z − t_cam[2]) / (R · d_cam)[2]
+
+    Args:
+        u: Pixel column coordinate.
+        v: Pixel row coordinate.
+        intrinsics: ``(fx, fy, cx, cy)`` in pixels.
+        cam_to_world: 4×4 camera-optical-frame → world transform
+                      (e.g., from :func:`cam_to_world_transform`).
+        plane_z: Height of the horizontal plane in world frame (metres).
+                 Use ``REACH_Z = 0.82 m`` for the operator hand plane.
+
+    Returns:
+        ``(x, y, z)`` world-frame position as plain Python floats, or
+        ``None`` if the ray is parallel to the plane (``d_world[z] ≈ 0``)
+        or the intersection is behind the camera (``s < 0``).
+    """
+    fx, fy, cx, cy = intrinsics
+
+    # Normalised direction in camera frame (unit z_cam = 1)
+    d_cam = np.array([(u - cx) / fx, (v - cy) / fy, 1.0], dtype=float)
+
+    R = cam_to_world[:3, :3]
+    t = cam_to_world[:3, 3]
+
+    d_world = R @ d_cam
+
+    # Solve P(s).z = plane_z
+    if abs(d_world[2]) < 1e-10:
+        return None  # ray is horizontal — no intersection
+
+    s = (plane_z - t[2]) / d_world[2]
+    if s < 0.0:
+        return None  # intersection is behind the camera
+
+    P = t + s * d_world
+    return float(P[0]), float(P[1]), float(P[2])
 
 
 # ---------------------------------------------------------------------------
@@ -454,14 +600,15 @@ class PerceptionNode(Node):  # type: ignore[misc]  # pragma: no cover
         self.declare_parameter("cam_height", _CAM_HEIGHT)
         self.declare_parameter("cam_hfov_rad", _CAM_HFOV)
         self.declare_parameter("loss_timeout_s", self._LOSS_TIMEOUT_S)
-        # Approximate camera pose (world frame) — overridden by TF at runtime.
-        # The camera is mounted above the table looking straight down.
-        self.declare_parameter("cam_x", 0.0)
-        self.declare_parameter("cam_y", 0.0)
-        self.declare_parameter("cam_z", 2.0)  # 2 m above table surface
-        # Known depth: distance from camera to table surface (metres).
-        # Used for depth estimation from colour-only image.
-        self.declare_parameter("table_depth_m", 1.26)  # 2.0 - 0.74 (table top)
+        # Camera pose (world frame) from cell.xacro mast chain.
+        # Defaults match xacro: camera_link at (-0.45, 0.35, 1.64),
+        # mast_to_camera pitch = 1.0 rad.
+        self.declare_parameter("cam_x", -0.45)
+        self.declare_parameter("cam_y", 0.35)
+        self.declare_parameter("cam_z", 1.64)
+        self.declare_parameter("cam_pitch_rad", 1.0)
+        # Plane height for ray–plane intersection (operator hand reach height).
+        self.declare_parameter("plane_z_m", 0.82)
 
         width = int(self.get_parameter("cam_width").value)
         height = int(self.get_parameter("cam_height").value)
@@ -469,15 +616,17 @@ class PerceptionNode(Node):  # type: ignore[misc]  # pragma: no cover
         loss_timeout = float(self.get_parameter("loss_timeout_s").value)
 
         self._fx, self._fy, self._cx, self._cy = _derive_intrinsics(width, height, hfov)
-        self._depth_m = float(self.get_parameter("table_depth_m").value)
+        self._plane_z = float(self.get_parameter("plane_z_m").value)
         self._logic = PerceptionLogic(loss_timeout_s=loss_timeout)
 
-        # Build an approximate camera→world transform from parameters.
-        # The camera looks straight down: flip Y and Z (180° about X).
+        # Build the calibrated camera→world transform from the true mast pose.
         cam_x = float(self.get_parameter("cam_x").value)
         cam_y = float(self.get_parameter("cam_y").value)
         cam_z = float(self.get_parameter("cam_z").value)
-        self._cam_to_world = self._make_cam_to_world(cam_x, cam_y, cam_z)
+        cam_pitch = float(self.get_parameter("cam_pitch_rad").value)
+        self._cam_to_world = cam_to_world_transform(
+            cam_x=cam_x, cam_y=cam_y, cam_z=cam_z, pitch_rad=cam_pitch
+        )
 
         self._bridge = CvBridge()
         self._br = TransformBroadcaster(self)
@@ -530,12 +679,24 @@ class PerceptionNode(Node):  # type: ignore[misc]  # pragma: no cover
 
         if detection is not None:
             u, v, area, conf = detection
-            x_cam, y_cam, z_cam = back_project(
-                u, v, self._depth_m, self._fx, self._fy, self._cx, self._cy
+            intrinsics = (self._fx, self._fy, self._cx, self._cy)
+            world_pt = project_pixel_to_plane(
+                u, v, intrinsics, self._cam_to_world, self._plane_z
             )
-            x_w, y_w, z_w = transform_point((x_cam, y_cam, z_cam), self._cam_to_world)
-            sigma = estimate_uncertainty(area, self._depth_m, conf)
-            self._logic.update(position=(x_w, y_w, z_w), sigma=sigma, timestamp_s=now_s)
+            if world_pt is not None:
+                x_w, y_w, z_w = world_pt
+                # Depth = Euclidean distance camera → detected point.
+                cam_pos = self._cam_to_world[:3, 3]
+                depth_m = float(np.linalg.norm(np.array([x_w, y_w, z_w]) - cam_pos))
+                sigma = estimate_uncertainty(area, depth_m, conf)
+                self._logic.update(
+                    position=(x_w, y_w, z_w), sigma=sigma, timestamp_s=now_s
+                )
+            else:
+                # Ray doesn't intersect the plane (degenerate/oblique detection).
+                self._logic.update(
+                    position=None, sigma=self._logic.sigma, timestamp_s=now_s
+                )
         else:
             # No detection this frame — let check_timeout handle the timeout.
             self._logic.update(
@@ -563,23 +724,6 @@ class PerceptionNode(Node):  # type: ignore[misc]  # pragma: no cover
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _make_cam_to_world(cam_x: float, cam_y: float, cam_z: float) -> np.ndarray:
-        """Build a camera→world 4×4 for a top-down camera (looking straight down).
-
-        The camera's +Z axis (optical axis) points downward in the world
-        frame.  To bring camera coordinates into world coordinates, flip
-        Y and Z (180° rotation about X), then translate by the camera pose.
-        """
-        rot_x_180 = np.eye(4, dtype=float)
-        rot_x_180[1, 1] = -1.0
-        rot_x_180[2, 2] = -1.0
-        trans = np.eye(4, dtype=float)
-        trans[0, 3] = cam_x
-        trans[1, 3] = cam_y
-        trans[2, 3] = cam_z
-        return trans @ rot_x_180
 
     def _broadcast_human_tf(
         self, position: Tuple[float, float, float], stamp: "rclpy.time.Time"
