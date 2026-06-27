@@ -125,15 +125,25 @@ def generate_test_description():
 # ---------------------------------------------------------------------------
 
 
-def _collect_float32_values(topic: str, duration_s: float) -> list:
+def _collect_float32_values(
+    topic: str, duration_s: float, best_effort: bool = False
+) -> list:
     """Collect std_msgs/Float32 data values from *topic* for *duration_s* seconds.
 
     Spawns ``ros2 topic echo topic`` and reads its output via a daemon thread so
     that ``readline()`` never blocks the outer deadline check (same pattern as
     ``_measure_hz`` in test_bringup.py).  Returns a list of floats.
+
+    *best_effort* makes the echo subscriber request BEST_EFFORT reliability,
+    required for topics the §3 contract publishes best-effort (e.g.
+    ``/safety/min_distance``): a default RELIABLE echo subscriber is QoS-
+    incompatible with a BEST_EFFORT publisher and would capture nothing.
     """
+    cmd = ["ros2", "topic", "echo", topic]
+    if best_effort:
+        cmd += ["--qos-reliability", "best_effort"]
     proc = subprocess.Popen(
-        ["ros2", "topic", "echo", topic],
+        cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
@@ -324,10 +334,21 @@ class TestSSMScenario(unittest.TestCase):
         # • arm_traj_seen: bool — did /arm_controller/joint_trajectory publish at all?
         scales: list = []
         zones: list = []
+        min_dists: list = []
         arm_traj_seen: list = [False]  # mutable container for thread result
 
         def _do_scales() -> None:
             scales.extend(_collect_float32_values("/safety/scale", _RECORD_SECONDS))
+
+        def _do_min_dist() -> None:
+            # /safety/min_distance is published best-effort (§3 contract) — the
+            # echo subscriber must match, or it captures nothing.  Diagnostic
+            # only: surfaces how close the operator and arm actually got.
+            min_dists.extend(
+                _collect_float32_values(
+                    "/safety/min_distance", _RECORD_SECONDS, best_effort=True
+                )
+            )
 
         def _do_zones() -> None:
             zones.extend(
@@ -351,6 +372,7 @@ class TestSSMScenario(unittest.TestCase):
         threads = [
             threading.Thread(target=_do_scales, daemon=True),
             threading.Thread(target=_do_zones, daemon=True),
+            threading.Thread(target=_do_min_dist, daemon=True),
             threading.Thread(target=_do_arm_traj, daemon=True),
         ]
         for t in threads:
@@ -428,13 +450,16 @@ class TestSSMScenario(unittest.TestCase):
             "AT-2 FAIL: 'yellow' zone not observed; expected as the operator "
             "enters the yellow band (d_red < d < d_yellow, ≈ 0.43–0.84 m).",
         )
+        closest = f"{min(min_dists):.3f} m" if min_dists else "unknown (no samples)"
         self.assertGreater(
             r_idx,
             -1,
             "AT-2 FAIL: 'red' zone not observed; expected when the operator's "
             "hand enters the tray (d ≤ d_red ≈ 0.43 m from the nearest robot frame). "
-            "If this fails, increase _RECORD_SECONDS or verify the kitting arm "
-            "and operator cycles overlap during the recording window.",
+            f"Closest separation actually reached: {closest}. If this is > 0.43 m, "
+            "the kitting arm and operator never share the tray closely enough — "
+            "check the arm's tray_drop pose reaches table height (FK) and that a "
+            "robot DROP overlaps an operator tray-reach in the recording window.",
         )
         self.assertGreater(
             y_idx,
