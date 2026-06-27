@@ -262,6 +262,33 @@ def _topic_has_messages(topic: str, window_s: float = 15.0) -> bool:
         return False
 
 
+def _is_subsequence(seq: list, pattern: list) -> bool:
+    """True if *pattern* occurs as an ordered (not necessarily contiguous) subsequence.
+
+    Used by AT-2/AT-4 instead of comparing global first-occurrence indices: the
+    cell cycles continuously (operator approach↔retreat, robot kitting loop), so
+    the recording window can start and end at any phase.  What we must prove is
+    that a correctly-ordered escalation (green→yellow→red) and de-escalation
+    actually occur *somewhere* in the window, not that the very first sample is
+    green.  Scans *seq* once.
+    """
+    it = iter(seq)
+    return all(any(x == p for x in it) for p in pattern)
+
+
+def _compress(seq: list) -> list:
+    """Collapse consecutive duplicates: ['a','a','b','a'] → ['a','b','a'].
+
+    Turns a ~1800-sample zone stream into its transition sequence for readable
+    diagnostics in assertion messages.
+    """
+    out: list = []
+    for x in seq:
+        if not out or out[-1] != x:
+            out.append(x)
+    return out
+
+
 def _wait_controllers_active(timeout_s: float = 60.0) -> bool:
     """Poll ``ros2 control list_controllers`` until both arm controllers are active.
 
@@ -422,55 +449,35 @@ class TestSSMScenario(unittest.TestCase):
         )
 
         # ------------------------------------------------------------------
-        # AT-2: zone transitions green → yellow → red (approach sequence)
+        # AT-2: zone escalates green → yellow → red during an approach
         # ------------------------------------------------------------------
-        # Find the first occurrence index of each zone in the temporal sequence.
-        # As the operator walks from the standing position toward the tray,
-        # d decreases monotonically → green → yellow → red.
-
-        def _first_idx(z: str) -> int:
-            try:
-                return zones.index(z)
-            except ValueError:
-                return -1
-
-        g_idx = _first_idx("green")
-        y_idx = _first_idx("yellow")
-        r_idx = _first_idx("red")
-
-        self.assertGreater(
-            g_idx,
-            -1,
-            "AT-2 FAIL: 'green' zone not observed; expected at the operator's "
-            "starting position where d >> d_yellow ≈ 0.84 m.",
-        )
-        self.assertGreater(
-            y_idx,
-            -1,
-            "AT-2 FAIL: 'yellow' zone not observed; expected as the operator "
-            "enters the yellow band (d_red < d < d_yellow, ≈ 0.43–0.84 m).",
-        )
+        # The cell cycles continuously: the operator repeatedly approaches the
+        # tray and withdraws while the robot kits, and the recording window opens
+        # at an arbitrary phase (often already mid-approach in 'yellow').  So we
+        # do NOT assert the first sample is green; we assert that the zone stream
+        # contains a correctly-ordered escalation green→yellow→red *somewhere* —
+        # i.e. at least one approach drove the separation monotonically down
+        # through all three bands in the right order.  De-escalation is covered
+        # by AT-4 (resume).
+        transitions = _compress(zones)
         closest = f"{min(min_dists):.3f} m" if min_dists else "unknown (no samples)"
-        self.assertGreater(
-            r_idx,
-            -1,
-            "AT-2 FAIL: 'red' zone not observed; expected when the operator's "
-            "hand enters the tray (d ≤ d_red ≈ 0.43 m from the nearest robot frame). "
-            f"Closest separation actually reached: {closest}. If this is > 0.43 m, "
-            "the kitting arm and operator never share the tray closely enough — "
-            "check the arm's tray_drop pose reaches table height (FK) and that a "
-            "robot DROP overlaps an operator tray-reach in the recording window.",
-        )
-        self.assertGreater(
-            y_idx,
-            g_idx,
-            "AT-2 FAIL: yellow must appear after green in the temporal sequence "
-            "(operator approaches: d decreases from green through yellow to red).",
-        )
-        self.assertGreater(
-            r_idx,
-            y_idx,
-            "AT-2 FAIL: red must appear after yellow in the temporal sequence.",
+
+        for z in ("green", "yellow", "red"):
+            self.assertIn(
+                z,
+                zones,
+                f"AT-2 FAIL: zone '{z}' never observed in the recording window. "
+                f"Closest separation reached: {closest}. Observed transitions: "
+                f"{transitions}. ('red' missing with closest > d_red ≈ 0.43 m means "
+                "the arm and operator never share the tray closely enough — check "
+                "the tray_drop pose reaches table height.)",
+            )
+
+        self.assertTrue(
+            _is_subsequence(zones, ["green", "yellow", "red"]),
+            "AT-2 FAIL: no ordered green→yellow→red escalation found. As the "
+            "operator approaches, separation must decrease through the bands in "
+            f"order (not skip green→red). Observed transitions: {transitions}.",
         )
 
         # ------------------------------------------------------------------
@@ -490,18 +497,20 @@ class TestSSMScenario(unittest.TestCase):
         # AT-4: clean resume — scale recovers toward 1.0 after the stop
         #        AND the arm trajectory topic resumes
         # ------------------------------------------------------------------
-        # Find the last index where scale was in protective-stop territory (<0.05),
-        # then check that subsequent samples climb back above 0.5 (arm resumes).
+        # Prove at least one clean stop→resume happened: find the FIRST
+        # protective stop and require a later recovery above 0.5.  Using the
+        # first stop (not the last) is robust to the recording ending while the
+        # operator is mid-approach in a stop — there is always a retreat after
+        # the first stop in a continuously-cycling run.
         stop_indices = [i for i, s in enumerate(scales) if s < 0.05]
         # stop_indices is guaranteed non-empty because AT-3 passed.
-        last_stop = max(stop_indices)
-        post_stop_scales = [s for s in scales[last_stop + 1 :] if s > 0.5]
+        first_stop = min(stop_indices)
+        post_stop_scales = [s for s in scales[first_stop + 1 :] if s > 0.5]
         self.assertGreater(
             len(post_stop_scales),
             0,
-            "AT-4 FAIL: /safety/scale did not recover above 0.5 after the "
-            "protective stop (last stop at sample index "
-            f"{last_stop}/{len(scales) - 1}). "
+            "AT-4 FAIL: /safety/scale never recovered above 0.5 after the first "
+            f"protective stop (sample index {first_stop}/{len(scales) - 1}). "
             "Operator retreat should raise scale back toward 1.0 (clean resume). "
             "Check motion_node resume logic and the operator path's withdrawal "
             "waypoints (OperatorPath.generate_random, waypoints 4–6).",
