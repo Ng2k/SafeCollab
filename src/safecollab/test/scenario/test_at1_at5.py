@@ -172,15 +172,32 @@ def _collect_string_values(
     topic: str,
     duration_s: float,
     valid_values: "set | None" = None,
+    transient_local: bool = False,
 ) -> list:
     """Collect std_msgs/String data values from *topic* for *duration_s* seconds.
 
     If *valid_values* is provided only strings in that set are kept (filters
     YAML boilerplate).  Surrounding quotes are stripped for robustness across
     ROS echo formats.
+
+    *transient_local* makes the echo subscriber request a RELIABLE +
+    TRANSIENT_LOCAL QoS profile.  This is required for topics the §3 contract
+    declares transient_local (e.g. ``/safety/zone``): ``ros2 topic echo`` uses a
+    VOLATILE subscription by default, which does not reliably receive from a
+    TRANSIENT_LOCAL publisher in this RMW — the symptom is an empty capture even
+    though the topic is being published every tick.  Matching the publisher's
+    durability fixes it (and also delivers the latched last sample on connect).
     """
+    cmd = ["ros2", "topic", "echo", topic]
+    if transient_local:
+        cmd += [
+            "--qos-reliability",
+            "reliable",
+            "--qos-durability",
+            "transient_local",
+        ]
     proc = subprocess.Popen(
-        ["ros2", "topic", "echo", topic],
+        cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
@@ -318,6 +335,8 @@ class TestSSMScenario(unittest.TestCase):
                     "/safety/zone",
                     _RECORD_SECONDS,
                     valid_values={"green", "yellow", "red", "lost"},
+                    # §3 contract: /safety/zone is reliable + transient_local.
+                    transient_local=True,
                 )
             )
 
@@ -350,8 +369,11 @@ class TestSSMScenario(unittest.TestCase):
         self.assertGreater(
             len(zones),
             0,
-            "/safety/zone published no messages during the recording window; "
-            "check that safety_monitor is running and publishing at 20 Hz.",
+            "/safety/zone captured no messages during the recording window. "
+            "Since /safety/scale (published on the same tick) was captured, the "
+            "monitor is alive — this is a QoS mismatch: /safety/zone is "
+            "reliable+transient_local (§3 contract), so the echo subscriber must "
+            "request matching durability (see transient_local=True above).",
         )
 
         # ------------------------------------------------------------------
