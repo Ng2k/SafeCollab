@@ -374,7 +374,21 @@ def main(args=None):  # pragma: no cover
 
         def __init__(self) -> None:
             super().__init__("human_node")
-            self._rng = random.Random()
+
+            # path_seed: integer ROS param for reproducible operator paths.
+            # seed <= 0  → unseeded Random (non-deterministic, default for live demo).
+            # seed > 0   → seeded Random(seed) — deterministic for scenario/AT tests.
+            # The parameter may arrive as a string from launch args (LaunchConfiguration
+            # substitution), so we coerce it to int defensively.
+            _seed_val = self.declare_parameter("path_seed", 0).value
+            if not isinstance(_seed_val, int):
+                try:
+                    _seed_val = int(_seed_val)
+                except (TypeError, ValueError):
+                    _seed_val = 0
+            # random.Random(None) seeds from OS entropy — identical to Random().
+            self._rng = random.Random(_seed_val if _seed_val > 0 else None)
+
             path = OperatorPath.generate_random(self._rng)
             self._model = OperatorModel(path)
             self._br = TransformBroadcaster(self)

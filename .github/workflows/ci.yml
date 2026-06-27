@@ -151,6 +151,32 @@ jobs:
           docker run --rm --init safecollab:ci \
             launch_test src/safecollab/test/integration/test_bringup.py
 
+  # 4b) SCENARIO — AT-1..AT-5 acceptance harness (ISO/TS 15066 SSM behaviour).
+  #     Uses safety_source:=ground_truth so there is NO perception dependency.
+  #     A fixed path_seed makes the operator path deterministic for CI.
+  #     Mirrors the integration job exactly: rebuild the deploy image, then run
+  #     launch_test inside it.  Self-skips gracefully when the test file is absent.
+  scenario:
+    needs: [integration]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: AT-1..AT-5 scenario harness (ground-truth SSM, inside the deploy image)
+        shell: bash
+        run: |
+          if [ ! -f "src/safecollab/test/scenario/test_at1_at5.py" ]; then
+            echo "::notice::test_at1_at5.py not present yet — scenario harness is wired and ready."
+            exit 0
+          fi
+          docker build -t safecollab:ci .
+          # entrypoint.sh sources /opt/ros/jazzy + the overlay, so the full ROS
+          # graph is available.  WORKDIR in the image is the workspace root, so
+          # the test path below resolves without any additional cd.
+          # --init: tini as PID 1 reaps gz's ruby children and forwards signals
+          # so teardown is clean (matches the integration job exactly).
+          docker run --rm --init safecollab:ci \
+            launch_test src/safecollab/test/scenario/test_at1_at5.py
+
   # 5) PACKAGE — build the deploy image; verify it launches headless (§7.5).
   package:
     needs: [integration]
@@ -185,7 +211,7 @@ jobs:
   #    .tar.gz and publish it as a GitHub Release ON THIS REPO with the
   #    per-version changelog as notes (AGENTS.md §7.6, §7a). No external registry.
   deliver:
-    needs: [lint, build, unit, integration, package]
+    needs: [lint, build, unit, integration, scenario, package]
     runs-on: ubuntu-latest
     permissions:
       contents: write # required to create a Release on this repo
