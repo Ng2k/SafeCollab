@@ -81,6 +81,19 @@ def generate_launch_description():
     )
     safety_source = LaunchConfiguration("safety_source")
 
+    path_seed_arg = DeclareLaunchArgument(
+        "path_seed",
+        default_value="0",
+        description=(
+            "Integer seed for the operator's random path in human_node.py. "
+            "0 (default): unseeded — non-deterministic, for the interactive demo. "
+            ">0: seeded — deterministic, for the scenario/acceptance test harness "
+            "(AT-1..AT-5 in test/scenario/test_at1_at5.py). "
+            "Example: ros2 launch safecollab cell.launch.py path_seed:=42"
+        ),
+    )
+    path_seed = LaunchConfiguration("path_seed")
+
     # ------------------------------------------------------------------
     # Gazebo simulation — §6 item 1 prerequisite
     # Two variants, exactly one runs per invocation (IfCondition / UnlessCondition).
@@ -260,11 +273,12 @@ def generate_launch_description():
     # Stream E: human_node — drives the simulated operator along randomisable paths
     # including tray-reaches (FR-11 / AT-6).  Broadcasts world->human_gt TF
     # (ground truth, sim-internal; never consumed by the safety loop per §3).
+    # path_seed: 0 (default) = non-deterministic; >0 = reproducible for AT tests.
     human_node = Node(
         package="safecollab",
         executable="human_node",
         output="screen",
-        parameters=[{"use_sim_time": True}],
+        parameters=[{"use_sim_time": True, "path_seed": path_seed}],
     )
 
     # Stream D: motion_node — fuses nominal trajectory * /safety/scale, re-times
@@ -316,6 +330,7 @@ def generate_launch_description():
         [
             headless_arg,
             safety_source_arg,
+            path_seed_arg,
             # gz sim: exactly one of these two runs depending on headless argument
             gz_server,  # headless=true  -> server-only (CI / no display)
             gz_full,  # headless=false -> server + GUI (interactive)
