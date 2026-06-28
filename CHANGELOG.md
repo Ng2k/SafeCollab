@@ -60,6 +60,10 @@ live scenario). See `docs/ROBUSTNESS.md`.
   zone-stream analysis, controller readiness) out of the AT-1..AT-5 harness into
   `test/scenario/_ssm_harness.py`, reused by both scenario harnesses (no
   duplication).
+- ci(deliver): build, save and upload the deploy image tarball **only on version
+  tags**. The `package` job still verifies the image build on every run, so
+  regular pushes/PRs no longer build and store the ~1 GB tarball — that was
+  filling the runner / CI artifact storage.
 
 ### Fixed
 
