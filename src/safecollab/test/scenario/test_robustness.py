@@ -8,7 +8,7 @@
 # stays green.
 #
 #   AT-6  Randomised operator paths generalise (no path-specific tuning)   [Sprint 1] DONE
-#   AT-5r Transient detection loss -> fail-safe -> re-acquire -> resume      [Sprint 4]
+#   AT-5r Transient detection loss -> fail-safe -> re-acquire -> resume      [Sprint 4] DONE
 #
 # Two P4 cases are pure-logic properties, proven faster and deterministically as
 # UNIT tests rather than live scenarios:
@@ -22,6 +22,7 @@
 # OWNED BY: the P4 robustness sprint (feat/p4-robustness).
 
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -72,6 +73,12 @@ _RECORD_SECONDS: float = 150.0
 #: Recoveries are one fewer in the worst case (window may end mid-stop).
 _MIN_ESCALATIONS: int = 3
 _MIN_RECOVERIES: int = 2
+
+#: AT-5 hardening (transient detection loss) timing.
+#: Wall-clock wait after SIGSTOP for loss_timeout (0.5 s sim) + RTF margin, and
+#: after SIGCONT for the TF to return and the loop to re-acquire.
+_AT5_STALE_WAIT: float = 10.0
+_AT5_RESUME_WAIT: float = 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +216,95 @@ class TestRobustness(unittest.TestCase):
             "generalise across paths.",
         )
 
-    @unittest.skip("P4 Sprint 4: transient detection loss recovery — pending")
-    def test_at5_transient_loss_recovers(self) -> None:
-        """AT-5 hardening: a transient perception dropout -> lost/protective-stop
-        with no node faulting, then re-acquire -> clean resume."""
+    def test_recovery_after_transient_detection_loss(self, cell_present: bool) -> None:
+        """AT-5 hardening: transient detection loss -> fail-safe -> re-acquire -> resume.
+
+        Runs AFTER ``test_at6_...`` (unittest orders methods alphabetically and
+        ``'test_at6' < 'test_r'``), so the SIGSTOP below cannot perturb the AT-6
+        generalisation recording.
+
+        SIGSTOP freezes ``human_node`` without killing it: the ground-truth TF
+        stops, so after ``loss_timeout`` the monitor must fail-safe (zone ``lost``,
+        scale 0) — a transient detection loss. SIGCONT restores the TF; the loop
+        must re-acquire and resume (scale recovers above 0.5) with no node
+        faulting (the post-shutdown ``test_exit_codes`` asserts the clean exit).
+        ``human_node`` is always SIGCONT'd before this method returns — even on an
+        assertion failure — so teardown stays clean.
+        """
+        if not cell_present:
+            self.skipTest(
+                "safecollab/launch/cell.launch.py not built yet; "
+                "P4 robustness harness is wired and ready."
+            )
+
+        # The cell is already settled (test_at6 ran first); just confirm the
+        # controllers are still active before perturbing the graph.
+        self.assertTrue(
+            wait_controllers_active(_CONTROLLER_TIMEOUT),
+            "controllers must be active before inducing the transient loss.",
+        )
+
+        # --- Induce a transient detection loss: freeze human_node (TF goes stale).
+        subprocess.run(
+            ["pkill", "-STOP", "-f", "human_node"],
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        try:
+            time.sleep(_AT5_STALE_WAIT)  # past loss_timeout (0.5 s sim) + RTF margin
+            scale_lost = collect_float32_values("/safety/scale", 5.0)
+            zone_lost = collect_string_values(
+                "/safety/zone",
+                3.0,
+                valid_values={"green", "yellow", "red", "lost"},
+                transient_local=True,
+            )
+        finally:
+            # ALWAYS resume human_node so the loop can recover and teardown is clean.
+            subprocess.run(
+                ["pkill", "-CONT", "-f", "human_node"],
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+        # --- Allow the TF to return and the loop to re-acquire, then sample.
+        time.sleep(_AT5_RESUME_WAIT)
+        scale_resume = collect_float32_values("/safety/scale", 10.0)
+
+        # Fail-safe held during the loss: scale pinned at 0, zone 'lost'.
+        self.assertGreater(
+            len(scale_lost),
+            0,
+            "AT-5 FAIL: /safety/scale went silent while the human TF was stale; "
+            "safety_monitor must keep publishing (scale=0) even in 'lost'.",
+        )
+        bad = [s for s in scale_lost if s >= 0.05]
+        self.assertEqual(
+            len(bad),
+            0,
+            f"AT-5 FAIL: {len(bad)}/{len(scale_lost)} scale samples were >= 0.05 "
+            f"(max {max(scale_lost):.3f}) while the human TF was stale; expected "
+            "0.0 (fail-safe 'lost' — FR-9; the last position is never reused).",
+        )
+        self.assertIn(
+            "lost",
+            zone_lost,
+            "AT-5 FAIL: zone did not enter 'lost' during the transient detection "
+            f"loss; observed {sorted(set(zone_lost))}.",
+        )
+
+        # Re-acquire and resume: once the TF returns, scale must recover.
+        self.assertGreater(
+            len(scale_resume),
+            0,
+            "AT-5 FAIL: /safety/scale silent after the operator was re-acquired.",
+        )
+        self.assertTrue(
+            any(s > 0.5 for s in scale_resume),
+            "AT-5 FAIL: scale did not recover above 0.5 after re-acquire "
+            f"(max {max(scale_resume):.3f}); the loop must resume once the human "
+            "TF returns (no permanent latch in the 'lost' fail-safe).",
+        )
 
 
 # ---------------------------------------------------------------------------

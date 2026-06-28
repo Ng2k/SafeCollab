@@ -24,6 +24,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
   ground-truth run is driven by several distinct paths; the harness asserts the
   `green→yellow→red` escalation and clean resume recur across them (no
   path-specific tuning) and that the zone never spuriously enters `lost`.
+- test(scenario): **AT-5 hardening** — transient detection loss recovery. In the
+  same robustness bring-up, `human_node` is SIGSTOP'd so the human TF goes stale:
+  the monitor must fail-safe (zone `lost`, scale 0); on SIGCONT the loop must
+  re-acquire and resume (scale recovers) with no node faulting (asserted by the
+  post-shutdown exit-code check). Runs after AT-6 so it cannot perturb it.
 - test(scenario): P4 robustness acceptance harness
   (`test/scenario/test_robustness.py`) wired into the CI `scenario` stage; the
   remaining cases (mid-trajectory resume, fast-crossing reaction, transient-loss
