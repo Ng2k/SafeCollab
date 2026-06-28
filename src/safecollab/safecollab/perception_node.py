@@ -386,7 +386,7 @@ _CAM_WIDTH: int = 640
 _CAM_HEIGHT: int = 480
 
 #: Default horizontal FOV for the gz camera (radians).
-_CAM_HFOV: float = 1.0472  # 60 degrees
+_CAM_HFOV: float = 1.5  # ~86 degrees — mirrors cell.xacro <horizontal_fov>
 
 
 def _derive_intrinsics(
@@ -420,9 +420,9 @@ def _derive_intrinsics(
 def cam_to_world_transform(
     *,
     cam_x: float = -0.45,
-    cam_y: float = 0.35,
-    cam_z: float = 1.64,
-    pitch_rad: float = 1.0,
+    cam_y: float = 0.0,
+    cam_z: float = 2.40,
+    pitch_rad: float = 1.2,
 ) -> np.ndarray:
     """Build the camera-optical-frame → world 4×4 homogeneous transform.
 
@@ -433,12 +433,12 @@ def cam_to_world_transform(
         world
          └─ world_to_table  xyz=(0, 0, 0.37)
              └─ table_to_top  xyz=(0, 0, 0.37)   → table_top at z=0.74 m
-                 └─ top_to_mast  xyz=(-0.55, 0.35, 0.45)
-                     └─ mast_to_camera  xyz=(0.10, 0, 0.45) rpy=(0, 1.0, 0)
+                 └─ top_to_mast  xyz=(-0.55, 0, 0.85)
+                     └─ mast_to_camera  xyz=(0.10, 0, 0.81) rpy=(0, 1.2, 0)
                          └─ camera_to_optical  rpy=(-π/2, 0, -π/2)
 
-    This places ``camera_link`` at world ``(-0.45, 0.35, 1.64)`` with
-    orientation ``Ry(1.0 rad)``.  The optical frame then adds
+    This places ``camera_link`` at world ``(-0.45, 0, 2.40)`` with
+    orientation ``Ry(1.2 rad)``.  The optical frame then adds
     ``Rz(−π/2) · Rx(−π/2)`` (URDF static/extrinsic RPY convention:
     ``rpy=(r, p, y)`` → ``Rz(y) · Ry(p) · Rx(r)``).
 
@@ -450,10 +450,10 @@ def cam_to_world_transform(
 
     Args:
         cam_x: Camera-link x in world frame (m).  Default from xacro: −0.45.
-        cam_y: Camera-link y in world frame (m).  Default from xacro:  0.35.
-        cam_z: Camera-link z in world frame (m).  Default from xacro:  1.64.
+        cam_y: Camera-link y in world frame (m).  Default from xacro:  0.00.
+        cam_z: Camera-link z in world frame (m).  Default from xacro:  2.40.
         pitch_rad: Camera-body pitch in radians (``mast_to_camera`` rpy y).
-                   Default 1.0 rad.
+                   Default 1.2 rad.
 
     Returns:
         4×4 ``numpy.ndarray`` (camera optical frame → world).
@@ -601,14 +601,18 @@ class PerceptionNode(Node):  # type: ignore[misc]  # pragma: no cover
         self.declare_parameter("cam_hfov_rad", _CAM_HFOV)
         self.declare_parameter("loss_timeout_s", self._LOSS_TIMEOUT_S)
         # Camera pose (world frame) from cell.xacro mast chain.
-        # Defaults match xacro: camera_link at (-0.45, 0.35, 1.64),
-        # mast_to_camera pitch = 1.0 rad.
+        # Defaults match xacro: camera_link at (-0.45, 0.0, 2.40),
+        # mast_to_camera pitch = 1.2 rad.
         self.declare_parameter("cam_x", -0.45)
-        self.declare_parameter("cam_y", 0.35)
-        self.declare_parameter("cam_z", 1.64)
-        self.declare_parameter("cam_pitch_rad", 1.0)
-        # Plane height for ray–plane intersection (operator hand reach height).
-        self.declare_parameter("plane_z_m", 0.82)
+        self.declare_parameter("cam_y", 0.0)
+        self.declare_parameter("cam_z", 2.40)
+        self.declare_parameter("cam_pitch_rad", 1.2)
+        # Plane height (world z, m) for the ray–plane back-projection. The
+        # operator is represented to the camera by a flat yellow marker held at
+        # this exact height (human_node._MARKER_Z), so the recovered (x, y) is
+        # parallax-free and the perceived 'human' TF tracks the operator's
+        # planar position across the whole path. MUST equal human_node._MARKER_Z.
+        self.declare_parameter("plane_z_m", 0.95)
 
         width = int(self.get_parameter("cam_width").value)
         height = int(self.get_parameter("cam_height").value)
