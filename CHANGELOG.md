@@ -17,6 +17,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
+### Fixed
+
+- fix(build): install the gz Harmonic Python bindings (`python3-gz-transport13`,
+  `python3-gz-msgs10`) from the OSRF apt repo — they are absent from the ROS apt repo,
+  which ships gz only as C++ vendor packages — so `human_node` can drive the operator
+  body via the `/world/empty/set_pose` service; install the `worlds/` directory so
+  `cell.launch.py` can resolve the project world after `colcon build`.
+- fix(sim): load `worlds/cell.sdf` (stock `empty.sdf` + the gz Sensors system) so the
+  overhead camera actually renders frames, and raise/centre/widen the camera mast
+  (world z 2.40 m, pitch 1.2 rad, hfov 1.5 rad) so the FOV covers the whole operator
+  working volume instead of only the tray (the standing/approach path was off-frame).
+- fix(perception): match `perception_node`'s camera pose + intrinsics to the new mast and
+  back-project detections onto the operator's constant working-height plane (0.95 m);
+  represent the operator with a flat marker held at that plane so the recovered planar
+  pose is parallax-free — perceived vs ground-truth now agree to ~1 cm live.
+- fix(sim): correct `human_node`'s gz `set_pose` request (it omitted the required
+  `request_type` argument, so the call always failed) and move the synchronous request to
+  a background worker thread, so a slow service can no longer stall the 50 Hz
+  ground-truth broadcast or freeze the operator body.
+- fix(validate): in `validate-perceived.sh`, sample perceived-vs-ground-truth, and
+  zone-vs-scale, concurrently — the previous sequential sampling measured the operator's
+  motion between reads (and cross-window phase skew) rather than perception accuracy / the
+  co-occurring SSM response, producing spurious failures on a correct system.
+
 ### Added
 
 - _(work in progress toward the next tag)_
