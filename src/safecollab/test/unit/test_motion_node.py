@@ -241,19 +241,21 @@ def test_resume_first_time_is_zero():
     assert times[0] == pytest.approx(0.0)
 
 
-def test_resume_includes_all_nominal_waypoints_after_current_state():
-    """After the current-state waypoint, all nominal waypoints must follow."""
+def test_resume_keeps_only_ahead_nominal_waypoints():
+    """After the current-state waypoint, only nominal waypoints still AHEAD of
+    the robot follow — already-passed leading waypoints are dropped so the resume
+    does not backtrack (AT-4 hardening)."""
     logic = MotionLogic()
-    nominal_positions = [[0.0], [1.0], [2.0]]
-    logic.set_nominal_trajectory(["j1"], [0.0, 1.0, 2.0], nominal_positions)
+    logic.set_nominal_trajectory(["j1"], [0.0, 1.0, 2.0], [[0.0], [1.0], [2.0]])
     logic.set_scale(0.0)
-    logic.set_joint_positions([0.4])
+    logic.set_joint_positions([0.4])  # stopped past the start (w0)
 
     logic.set_scale(1.0)
     _, _, positions = logic.compute_command(resuming=True)
 
-    # positions[0] = current state; positions[1:] = all nominal waypoints
-    assert positions[1:] == nominal_positions
+    # positions[0] = current state; the passed w0=[0.0] is dropped; w1, w2 follow.
+    assert positions[0] == pytest.approx([0.4])
+    assert positions[1:] == [[1.0], [2.0]]
 
 
 def test_resume_times_are_monotonically_increasing():
@@ -275,7 +277,11 @@ def test_resume_times_are_monotonically_increasing():
 
 
 def test_resume_retimes_with_half_speed():
-    """Resume + half speed: times stretched 2x."""
+    """Resume + half speed: kept times stretched 2x.
+
+    current=[0.5] is past w0=[0.0] on a [w0, w1] leg, so resume drops w0 and
+    keeps [current, w1]; times [0.0, dt] (dt=1.0) -> retime(0.5) -> [0.0, 2.0].
+    """
     logic = MotionLogic()
     logic.set_nominal_trajectory(["j1"], [0.0, 1.0], [[0.0], [1.0]])
     logic.set_scale(0.0)
@@ -284,9 +290,7 @@ def test_resume_retimes_with_half_speed():
     logic.set_scale(0.5)
     _, times, _ = logic.compute_command(resuming=True)
 
-    # Resume times (scale=1): [0.0, dt, 1.0+dt] where dt = 1.0 -> [0.0, 1.0, 2.0]
-    # After retime(scale=0.5): [0.0, 2.0, 4.0]
-    assert times == pytest.approx([0.0, 2.0, 4.0])
+    assert times == pytest.approx([0.0, 2.0])
 
 
 def test_resume_without_joint_positions_falls_back_to_nominal():
@@ -302,6 +306,70 @@ def test_resume_without_joint_positions_falls_back_to_nominal():
     assert cmd is not None
     _, _, positions = cmd
     assert positions == [[0.0], [1.0]]  # nominal positions unchanged
+
+
+# ---------------------------------------------------------------------------
+# AT-4 hardening (P4): a mid-trajectory protective stop resumes without backtrack
+# ---------------------------------------------------------------------------
+
+
+def test_resume_mid_leg_does_not_backtrack_to_leg_start():
+    """A stop part-way through a [start, end] leg resumes straight on to end.
+
+    task_node publishes each leg as a 2-waypoint trajectory [leg_start, leg_end].
+    If the robot is halted between them, resume must NOT re-insert leg_start —
+    that would drive the arm backward then forward again (a jerk, and motion the
+    operator would not expect in a shared workspace). The resumed trajectory is
+    [current, leg_end] only.
+    """
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1", "j2"], [0.0, 1.0], [[0.0, 0.0], [2.0, 2.0]])
+    logic.set_scale(0.0)
+    logic.set_joint_positions([1.2, 1.2])  # halted mid-leg, past the start
+
+    logic.set_scale(1.0)
+    _, _, positions = logic.compute_command(resuming=True)
+
+    assert positions[0] == pytest.approx([1.2, 1.2]), "resume starts at current state"
+    assert [0.0, 0.0] not in positions, "leg_start must not reappear (no backtrack)"
+    assert positions == [[1.2, 1.2], [2.0, 2.0]]
+
+
+def test_resume_monotonic_progress_toward_goal():
+    """Distance to the goal is non-increasing along the resumed trajectory.
+
+    Generalises 'no backtrack' to a multi-waypoint leg: waypoints behind the
+    current position are dropped, so progress toward the goal never reverses.
+    """
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(
+        ["j1"], [0.0, 1.0, 2.0, 3.0], [[0.0], [1.0], [2.0], [3.0]]
+    )
+    logic.set_scale(0.0)
+    logic.set_joint_positions([1.5])  # between w1 and w2
+
+    logic.set_scale(1.0)
+    _, _, positions = logic.compute_command(resuming=True)
+
+    goal = positions[-1]
+    dists = [abs(p[0] - goal[0]) for p in positions]
+    for a, b in zip(dists, dists[1:]):
+        assert b <= a, f"distance to goal must not increase (backtrack): {dists}"
+    # w0, w1 are behind current -> dropped; current + w2 + w3 remain.
+    assert positions == [[1.5], [2.0], [3.0]]
+
+
+def test_resume_barely_moved_keeps_ahead_waypoints():
+    """If the robot only just left the start, the ahead waypoints are retained."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1"], [0.0, 1.0, 2.0], [[0.0], [1.0], [2.0]])
+    logic.set_scale(0.0)
+    logic.set_joint_positions([0.05])  # only just past the start
+
+    logic.set_scale(1.0)
+    _, _, positions = logic.compute_command(resuming=True)
+    # The passed start w0 is dropped; both ahead waypoints w1, w2 are kept.
+    assert positions == [[0.05], [1.0], [2.0]]
 
 
 # ---------------------------------------------------------------------------

@@ -155,14 +155,20 @@ class MotionLogic:
         if resuming and self._joint_positions is not None and positions:
             # Build a fresh trajectory starting from the current robot state.
             #
-            # Prepend the halted position as waypoint 0 at t=0.  Shift the
-            # nominal times forward by one inter-waypoint interval (dt) so
-            # the controller has a non-zero time-budget to move from the
-            # current state to the first nominal waypoint.
+            # Prepend the halted position as waypoint 0 at t=0, then continue with
+            # only the nominal waypoints that are still AHEAD of the current
+            # position (see _ahead_positions).  Dropping already-passed waypoints
+            # is the "no backtrack" half of the §6 clean-resume contract: a leg is
+            # published as [leg_start, leg_end], so a protective stop part-way
+            # through it must resume by driving on to leg_end — NOT back to
+            # leg_start and then forward again (that backtrack is a jerk and, in a
+            # shared workspace, motion the operator would not expect).
             #
-            # Example (nominal times [0.0, 1.0, 2.0], dt=1.0):
-            #   resume_times = [0.0, 1.0, 2.0, 3.0]
-            #   After retime(scale=0.5): [0.0, 2.0, 4.0, 6.0]
+            # The kept waypoints are evenly spaced by one inter-waypoint interval
+            # (dt) so the controller has a non-zero time budget for each segment.
+            # Example (nominal [w0, w1, w2], dt=1.0, robot stopped past w1):
+            #   ahead = [w2]; resume_times = [0.0, 1.0]
+            #   After retime(scale=0.5): [0.0, 2.0]
             if len(times) >= 2:
                 dt = times[1] - times[0]
             elif len(times) == 1:
@@ -170,8 +176,9 @@ class MotionLogic:
             else:
                 dt = 1.0
 
-            times_to_use = [0.0] + [t + dt for t in times]
-            positions_to_use = [self._joint_positions] + list(positions)
+            ahead = self._ahead_positions(self._joint_positions, positions)
+            times_to_use = [0.0] + [(i + 1) * dt for i in range(len(ahead))]
+            positions_to_use = [self._joint_positions] + ahead
         else:
             times_to_use = times
             positions_to_use = positions
@@ -182,6 +189,34 @@ class MotionLogic:
             return None
 
         return (joint_names, new_times, positions_to_use)
+
+    # ------------------------------------------------------------------
+    # Resume helpers (no-backtrack re-planning)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _distance(a: list[float], b: list[float]) -> float:
+        """Euclidean distance between two joint-space configurations."""
+        return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+
+    def _ahead_positions(
+        self, current: list[float], positions: list[list[float]]
+    ) -> list[list[float]]:
+        """Return the nominal waypoints still ahead of *current* toward the goal.
+
+        A waypoint is "ahead" when it is strictly closer to the goal (the last
+        nominal waypoint) than *current* is — i.e. the robot has not yet passed
+        it.  Already-passed leading waypoints are dropped so a resume after a
+        mid-trajectory stop continues toward the goal instead of backtracking to
+        the start of the leg.  The goal is always kept, so the result is never
+        empty (resume = [current, goal] in the worst case).
+        """
+        goal = positions[-1]
+        d_current = self._distance(current, goal)
+        ahead = [p for p in positions if self._distance(p, goal) < d_current]
+        if not ahead or ahead[-1] != goal:
+            ahead.append(goal)
+        return ahead
 
 
 # ---------------------------------------------------------------------------

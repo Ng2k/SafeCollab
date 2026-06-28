@@ -38,6 +38,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
   `test/scenario/_ssm_harness.py`, reused by both scenario harnesses (no
   duplication).
 
+### Fixed
+
+- fix(motion): **AT-4 hardening** — a protective stop part-way through a leg now
+  resumes without backtracking. A leg is published as `[leg_start, leg_end]`, so
+  the old resume (`[current, leg_start, leg_end]`) drove the arm back to the leg
+  start before going forward. `MotionLogic` now drops nominal waypoints the robot
+  has already passed (those no closer to the goal than the current state),
+  resuming as `[current, leg_end]` — monotonic progress toward the goal, no jerk.
+
 ---
 
 ## [0.3.0] - 2026-06-28 — P2–P3: perception-driven human + closed safety loop
