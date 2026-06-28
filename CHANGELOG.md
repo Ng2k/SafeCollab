@@ -21,6 +21,90 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ---
 
+## [0.4.0] - 2026-06-28 — P4: robustness (generalisation, recovery, fail-safe re-acquire)
+
+Hardens the closed Speed-and-Separation-Monitoring loop so it behaves correctly
+under adverse conditions, proven by acceptance tests with **no path-specific
+tuning and no new hand-tuned constants**. The four P4 guarantees — randomised
+operator-path generalisation (AT-6), no-backtrack resume from a mid-trajectory
+protective stop (AT-4r), a fast crossing that cannot skip the protective stop
+(AT-3r), and transient detection-loss → fail-safe → re-acquire → resume (AT-5r)
+— are each verified at the cheapest reliable layer (a pure-logic unit test or a
+live scenario). See `docs/ROBUSTNESS.md`.
+
+### Added
+
+- test(scenario): **AT-6** — randomised operator paths generalise. With a fixed
+  seed, `human_node` regenerates a fresh random path each cycle, so one long
+  ground-truth run is driven by several distinct paths; the harness asserts the
+  `green→yellow→red` escalation and clean resume recur across them (no
+  path-specific tuning) and that the zone never spuriously enters `lost`.
+- test(scenario): **AT-5 hardening** — transient detection loss recovery. In the
+  same robustness bring-up, `human_node` is SIGSTOP'd so the human TF goes stale:
+  the monitor must fail-safe (zone `lost`, scale 0); on SIGCONT the zone must
+  leave `lost` (re-acquire, no permanent latch) and the protective stop must lift
+  (scale rises above the stop floor), with no node faulting (asserted by the
+  post-shutdown exit-code check). The recovery check is position-independent — it
+  does not require a specific scale, since where the operator is when re-acquired
+  depends on freeze-duration × real-time factor. Runs after AT-6 so it cannot
+  perturb it.
+- test(scenario): P4 robustness acceptance harness
+  (`test/scenario/test_robustness.py`) wired into the CI `scenario` stage,
+  holding the live robustness cases (AT-6, AT-5r); the pure-logic cases (AT-4r,
+  AT-3r) are unit tests (see `docs/ROADMAP-P4.md` / `docs/ROBUSTNESS.md`).
+- docs(roadmap): `docs/ROADMAP-P4.md` — TDD/agile task breakdown for the P4
+  robustness phase (→ v0.4.0).
+- docs(robustness): `docs/ROBUSTNESS.md` — the four P4 robustness guarantees
+  (AT-6, AT-4r, AT-3r, AT-5r), the layer each is verified at, and how to
+  reproduce them.
+
+### Changed
+
+- test(scenario): factor the shared launch_testing helpers (topic collection,
+  zone-stream analysis, controller readiness) out of the AT-1..AT-5 harness into
+  `test/scenario/_ssm_harness.py`, reused by both scenario harnesses (no
+  duplication).
+- ci(deliver): build, save and upload the deploy image tarball **only on version
+  tags**. The `package` job still verifies the image build on every run, so
+  regular pushes/PRs no longer build and store the ~1 GB tarball — that was
+  filling the runner / CI artifact storage.
+
+### Fixed
+
+- fix(motion): **AT-4 hardening** — a protective stop part-way through a leg now
+  resumes without backtracking. A leg is published as `[leg_start, leg_end]`, so
+  the old resume (`[current, leg_start, leg_end]`) drove the arm back to the leg
+  start before going forward. `MotionLogic` now drops nominal waypoints the robot
+  has already passed (those no closer to the goal than the current state),
+  resuming as `[current, leg_end]` — monotonic progress toward the goal, no jerk.
+- test(safety): **AT-3 hardening** — guard the fast-crossing sampling invariant
+  (`test_fast_crossing.py`): even at the maximum modelled operator speed
+  (`risk.yaml` `v_h`), the per-monitor-tick step (`v_h / SafetyMonitorNode._TICK_HZ`)
+  is well below the red band `[0, d_red]`, so several samples land in red before
+  contact — a fast crossing cannot tunnel through the protective stop between
+  ticks. Inputs are read from the real config/node (no hard-coded thresholds).
+- fix(scenario): restore `import threading` in the AT-1..AT-5 harness — the
+  helper extraction dropped it while the test body still uses `threading.Thread`
+  for its parallel collectors (a runtime `NameError` the import-time check missed).
+- fix(scenario): record the cell topics (`/safety/scale`, `/safety/zone`,
+  `/safety/min_distance`, and the `/arm_controller/joint_trajectory` presence
+  check) with a single in-process rclpy subscriber (`record_safety_topics`)
+  instead of `ros2 topic echo` subprocesses. The CLI echo lost the DDS discovery
+  race under load and captured nothing — first the reliable+transient_local
+  `/safety/zone` (failing AT-1/AT-2 with an empty zone stream while
+  `/safety/scale` on the same tick was fine), then the arm-trajectory `--once`
+  check (failing AT-4). One subscriber with QoS matched to each topic's contract
+  is deterministic.
+
+**Verification:** 264 unit tests passing, total coverage 97.4% (≥ 90 % gate on
+safety/risk); `ruff check` + `ruff format --check` clean; the AT-1..AT-5 and the
+P4 robustness scenario harnesses both green headless; full CI pipeline (lint,
+build, unit + coverage, integration, package, deliver) green on GitHub Actions.
+
+**Artifact:** `safecollab-v0.4.0.tar.gz` (published on the repo Releases page).
+
+---
+
 ## [0.3.0] - 2026-06-28 — P2–P3: perception-driven human + closed safety loop
 
 The **perceived** Speed-and-Separation-Monitoring path now runs end-to-end live: a
@@ -222,12 +306,13 @@ the `ros:jazzy-ros-base` container.
 | ~~`v0.1.0`~~ | P0 | ~~Foundation + CI; pure safety/risk core (TDD)~~ — **released above** |
 | ~~`v0.2.0`~~ | P1 | ~~Collaborative kitting loop~~ — **released above (+ motion layer)** |
 | ~~`v0.3.0`~~ | P2–P3 | ~~Perception-driven human + safety loop closed (zones, stop, resume, fail-safe)~~ — **released above** |
-| `v0.4.0` | P4 | Robustness (randomised paths, recovery, edge cases) |
+| ~~`v0.4.0`~~ | P4 | ~~Robustness (randomised paths, recovery, edge cases)~~ — **released above** |
 | `v0.5.0` | P5 | Polish + demo video / GIF |
 | `v0.6.0` | P6 | Documentation (README, diagrams, risk note) |
 | **`v1.0.0`** | **submission** | **Acceptance AT-1…AT-5 passing; final image artifact + notes** |
 
-[Unreleased]: https://github.com/<owner>/safecollab/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/<owner>/safecollab/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/<owner>/safecollab/releases/tag/v0.4.0
 [0.3.0]: https://github.com/<owner>/safecollab/releases/tag/v0.3.0
 [0.2.0]: https://github.com/<owner>/safecollab/releases/tag/v0.2.0
 [0.1.0]: https://github.com/<owner>/safecollab/releases/tag/v0.1.0

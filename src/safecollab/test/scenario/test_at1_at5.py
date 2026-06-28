@@ -28,10 +28,9 @@
 # OWNED BY: Stream G (CI/CD & container) — same ownership as the integration harness.
 
 import os
-import queue
 import signal
 import subprocess
-import threading
+import sys
 import time
 import unittest
 
@@ -44,27 +43,17 @@ import pytest
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
-
-# ---------------------------------------------------------------------------
-# Launch file discovery
-# ---------------------------------------------------------------------------
-
-
-def _locate_cell_launch():
-    """Return the absolute path to cell.launch.py, or None if not installed."""
-    try:
-        from ament_index_python.packages import (  # type: ignore[import]
-            PackageNotFoundError,
-            get_package_share_directory,
-        )
-    except ImportError:
-        return None
-    try:
-        share = get_package_share_directory("safecollab")
-    except PackageNotFoundError:
-        return None
-    cell_launch = os.path.join(share, "launch", "cell.launch.py")
-    return cell_launch if os.path.exists(cell_launch) else None
+# Shared scenario helpers live in the sibling _ssm_harness module. launch_test
+# loads this file by path, so make its directory importable before importing it.
+# Aliased to the previous private names so the test bodies below are unchanged.
+sys.path.insert(0, os.path.dirname(__file__))
+from _ssm_harness import (  # noqa: E402  (intentional: after the sys.path tweak)
+    compress as _compress,
+    is_subsequence as _is_subsequence,
+    locate_cell_launch as _locate_cell_launch,
+    record_safety_topics as _record_safety_topics,
+    wait_controllers_active as _wait_controllers_active,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -121,204 +110,6 @@ def generate_test_description():
 
 
 # ---------------------------------------------------------------------------
-# Topic-collection helpers  (mirror the style of test_bringup.py)
-# ---------------------------------------------------------------------------
-
-
-def _collect_float32_values(
-    topic: str, duration_s: float, best_effort: bool = False
-) -> list:
-    """Collect std_msgs/Float32 data values from *topic* for *duration_s* seconds.
-
-    Spawns ``ros2 topic echo topic`` and reads its output via a daemon thread so
-    that ``readline()`` never blocks the outer deadline check (same pattern as
-    ``_measure_hz`` in test_bringup.py).  Returns a list of floats.
-
-    *best_effort* makes the echo subscriber request BEST_EFFORT reliability,
-    required for topics the §3 contract publishes best-effort (e.g.
-    ``/safety/min_distance``): a default RELIABLE echo subscriber is QoS-
-    incompatible with a BEST_EFFORT publisher and would capture nothing.
-    """
-    cmd = ["ros2", "topic", "echo", topic]
-    if best_effort:
-        cmd += ["--qos-reliability", "best_effort"]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    values: list = []
-    lq: queue.Queue = queue.Queue()
-
-    def _reader() -> None:
-        for line in proc.stdout:
-            lq.put(line)
-
-    threading.Thread(target=_reader, daemon=True).start()
-
-    deadline = time.monotonic() + duration_s
-    while time.monotonic() < deadline:
-        try:
-            line = lq.get(timeout=0.1)
-        except queue.Empty:
-            continue
-        if line.startswith("data: "):
-            try:
-                values.append(float(line[6:].strip()))
-            except ValueError:
-                pass
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=5.0)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-    return values
-
-
-def _collect_string_values(
-    topic: str,
-    duration_s: float,
-    valid_values: "set | None" = None,
-    transient_local: bool = False,
-) -> list:
-    """Collect std_msgs/String data values from *topic* for *duration_s* seconds.
-
-    If *valid_values* is provided only strings in that set are kept (filters
-    YAML boilerplate).  Surrounding quotes are stripped for robustness across
-    ROS echo formats.
-
-    *transient_local* makes the echo subscriber request a RELIABLE +
-    TRANSIENT_LOCAL QoS profile.  This is required for topics the §3 contract
-    declares transient_local (e.g. ``/safety/zone``): ``ros2 topic echo`` uses a
-    VOLATILE subscription by default, which does not reliably receive from a
-    TRANSIENT_LOCAL publisher in this RMW — the symptom is an empty capture even
-    though the topic is being published every tick.  Matching the publisher's
-    durability fixes it (and also delivers the latched last sample on connect).
-    """
-    cmd = ["ros2", "topic", "echo", topic]
-    if transient_local:
-        cmd += [
-            "--qos-reliability",
-            "reliable",
-            "--qos-durability",
-            "transient_local",
-        ]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    values: list = []
-    lq: queue.Queue = queue.Queue()
-
-    def _reader() -> None:
-        for line in proc.stdout:
-            lq.put(line)
-
-    threading.Thread(target=_reader, daemon=True).start()
-
-    deadline = time.monotonic() + duration_s
-    while time.monotonic() < deadline:
-        try:
-            line = lq.get(timeout=0.1)
-        except queue.Empty:
-            continue
-        if line.startswith("data: "):
-            val = line[6:].strip().strip("'\"")
-            if valid_values is None or val in valid_values:
-                values.append(val)
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=5.0)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-    return values
-
-
-def _topic_has_messages(topic: str, window_s: float = 15.0) -> bool:
-    """Return True if *topic* receives at least one message within *window_s* s.
-
-    Uses ``ros2 topic echo --once`` which exits with code 0 after the first
-    message arrives; code 1 / TimeoutExpired means nothing arrived.
-    """
-    proc = subprocess.Popen(
-        ["ros2", "topic", "echo", "--once", topic],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    try:
-        proc.wait(timeout=window_s)
-        return proc.returncode == 0
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        return False
-
-
-def _is_subsequence(seq: list, pattern: list) -> bool:
-    """True if *pattern* occurs as an ordered (not necessarily contiguous) subsequence.
-
-    Used by AT-2/AT-4 instead of comparing global first-occurrence indices: the
-    cell cycles continuously (operator approach↔retreat, robot kitting loop), so
-    the recording window can start and end at any phase.  What we must prove is
-    that a correctly-ordered escalation (green→yellow→red) and de-escalation
-    actually occur *somewhere* in the window, not that the very first sample is
-    green.  Scans *seq* once.
-    """
-    it = iter(seq)
-    return all(any(x == p for x in it) for p in pattern)
-
-
-def _compress(seq: list) -> list:
-    """Collapse consecutive duplicates: ['a','a','b','a'] → ['a','b','a'].
-
-    Turns a ~1800-sample zone stream into its transition sequence for readable
-    diagnostics in assertion messages.
-    """
-    out: list = []
-    for x in seq:
-        if not out or out[-1] != x:
-            out.append(x)
-    return out
-
-
-def _wait_controllers_active(timeout_s: float = 60.0) -> bool:
-    """Poll ``ros2 control list_controllers`` until both arm controllers are active.
-
-    Mirrors the implementation in test_bringup.py; retries every 1 s within
-    *timeout_s*.  The controller_manager service only appears after gz sim's
-    first world step, so the spawners may not have finished at settle time.
-    """
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        try:
-            out = subprocess.check_output(
-                ["ros2", "control", "list_controllers"],
-                text=True,
-                stderr=subprocess.DEVNULL,
-                timeout=8,
-            )
-            lines = out.splitlines()
-            arm_ok = any("arm_controller" in ln and "active" in ln for ln in lines)
-            jsb_ok = any(
-                "joint_state_broadcaster" in ln and "active" in ln for ln in lines
-            )
-            if arm_ok and jsb_ok:
-                return True
-        except Exception:  # noqa: BLE001
-            pass
-        time.sleep(1.0)
-    return False
-
-
-# ---------------------------------------------------------------------------
 # Active-test class — runs while the launch is alive
 # ---------------------------------------------------------------------------
 
@@ -353,59 +144,22 @@ class TestSSMScenario(unittest.TestCase):
         )
 
         # ------------------------------------------------------------------
-        # Phase 2 — record /safety/scale, /safety/zone, /arm_controller/joint_trajectory
+        # Phase 2 — record /safety/scale, /safety/zone, /safety/min_distance,
+        #           and check /arm_controller/joint_trajectory
         # ------------------------------------------------------------------
-        # Three independent subprocess collectors run in parallel for _RECORD_SECONDS.
-        # • scales: Float32 samples at ~20 Hz → ~1800 samples over 90 s
-        # • zones:  String samples (green|yellow|red|lost) at ~20 Hz → ~1800 samples
-        # • arm_traj_seen: bool — did /arm_controller/joint_trajectory publish at all?
-        scales: list = []
-        zones: list = []
-        min_dists: list = []
-        arm_traj_seen: list = [False]  # mutable container for thread result
-
-        def _do_scales() -> None:
-            scales.extend(_collect_float32_values("/safety/scale", _RECORD_SECONDS))
-
-        def _do_min_dist() -> None:
-            # /safety/min_distance is published best-effort (§3 contract) — the
-            # echo subscriber must match, or it captures nothing.  Diagnostic
-            # only: surfaces how close the operator and arm actually got.
-            min_dists.extend(
-                _collect_float32_values(
-                    "/safety/min_distance", _RECORD_SECONDS, best_effort=True
-                )
-            )
-
-        def _do_zones() -> None:
-            zones.extend(
-                _collect_string_values(
-                    "/safety/zone",
-                    _RECORD_SECONDS,
-                    valid_values={"green", "yellow", "red", "lost"},
-                    # §3 contract: /safety/zone is reliable + transient_local.
-                    transient_local=True,
-                )
-            )
-
-        def _do_arm_traj() -> None:
-            # A single message within _RECORD_SECONDS is sufficient to confirm
-            # motion_node is producing re-timed trajectory commands.
-            arm_traj_seen[0] = _topic_has_messages(
-                "/arm_controller/joint_trajectory",
-                window_s=_RECORD_SECONDS,
-            )
-
-        threads = [
-            threading.Thread(target=_do_scales, daemon=True),
-            threading.Thread(target=_do_zones, daemon=True),
-            threading.Thread(target=_do_min_dist, daemon=True),
-            threading.Thread(target=_do_arm_traj, daemon=True),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=_RECORD_SECONDS + 10.0)
+        # One in-process rclpy subscriber records all four topics for
+        # _RECORD_SECONDS (~1800 samples each at 20 Hz for the /safety topics),
+        # with QoS matched to each topic's contract — deterministic where the old
+        # concurrent `ros2 topic echo` subprocesses could lose the DDS discovery
+        # race and capture nothing (the transient_local /safety/zone, and even the
+        # arm-trajectory presence check).
+        rec = _record_safety_topics(
+            _RECORD_SECONDS, zone=True, scale=True, min_distance=True, arm_traj=True
+        )
+        scales = rec["scales"]
+        zones = rec["zones"]
+        min_dists = rec["min_dists"]
+        arm_traj_seen = rec["arm_traj_count"] > 0
 
         # Sanity: both primary topics must have published something.
         self.assertGreater(
@@ -516,7 +270,7 @@ class TestSSMScenario(unittest.TestCase):
             "waypoints (OperatorPath.generate_random, waypoints 4–6).",
         )
         self.assertTrue(
-            arm_traj_seen[0],
+            arm_traj_seen,
             "AT-4 FAIL: /arm_controller/joint_trajectory published no messages "
             f"in the {_RECORD_SECONDS:.0f} s recording window. "
             "motion_node must publish re-timed trajectory commands when scale > 0; "
@@ -541,7 +295,7 @@ class TestSSMScenario(unittest.TestCase):
         time.sleep(_AT5_STALE_WAIT)
 
         # Collect a 5 s window of scale samples; all must be ≈ 0 (fail-safe active).
-        scale_at5 = _collect_float32_values("/safety/scale", 5.0)
+        scale_at5 = _record_safety_topics(5.0, scale=True)["scales"]
 
         # Resume human_node BEFORE asserting so teardown stays clean even on failure.
         subprocess.run(

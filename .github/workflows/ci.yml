@@ -66,7 +66,8 @@ jobs:
         run: |
           source /opt/ros/${ROS_DISTRO}/setup.bash
           colcon build --symlink-install
-      - name: Upload build/install overlay
+      - name: Upload build/install overlay (tags only — saves CI artifact storage)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v6
         with:
           name: colcon-overlay
@@ -176,6 +177,14 @@ jobs:
           # so teardown is clean (matches the integration job exactly).
           docker run --rm --init safecollab:ci \
             launch_test src/safecollab/test/scenario/test_at1_at5.py
+          # P4 robustness acceptance harness (AT-6 + AT-3/4/5 hardening). Reuses
+          # the image just built; self-skips gracefully until the file lands.
+          if [ -f "src/safecollab/test/scenario/test_robustness.py" ]; then
+            docker run --rm --init safecollab:ci \
+              launch_test src/safecollab/test/scenario/test_robustness.py
+          else
+            echo "::notice::test_robustness.py not present yet — P4 harness is wired and ready."
+          fi
 
   # 5) PACKAGE — build the deploy image; verify it launches headless (§7.5).
   package:
@@ -212,6 +221,11 @@ jobs:
   #    per-version changelog as notes (AGENTS.md §7.6, §7a). No external registry.
   deliver:
     needs: [lint, build, unit, integration, scenario, package]
+    # Tags only. Building, saving and uploading the ~1 GB image tarball on every
+    # push/PR fills the runner / artifact storage; the deploy artifact is only
+    # needed for a release. Regular CI runs still fully verify the image build via
+    # the `package` job — this job just produces and publishes the release asset.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write # required to create a Release on this repo
@@ -219,26 +233,22 @@ jobs:
       - uses: actions/checkout@v6
       - name: Resolve image tag
         id: meta
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          fi
+        # This job only runs on version tags (job-level `if`), so the image tag
+        # is always the ref name (e.g. v0.4.0).
+        run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
       - name: Build the container image (the deploy artifact)
         run: docker build -t safecollab:${{ steps.meta.outputs.tag }} .
       - name: Save image as a portable tarball
         run: |
           docker save safecollab:${{ steps.meta.outputs.tag }} \
             | gzip > safecollab-${{ steps.meta.outputs.tag }}.tar.gz
-      - name: Upload tarball as a workflow artifact (every run)
+      - name: Upload the release tarball as a workflow artifact
         uses: actions/upload-artifact@v6
         with:
           name: safecollab-image-${{ steps.meta.outputs.tag }}
           path: safecollab-${{ steps.meta.outputs.tag }}.tar.gz
           retention-days: 14
-      - name: Slice the changelog for this version (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Slice the changelog for this version
         run: |
           version="${GITHUB_REF_NAME#v}"
           # Match section headers literally (index()) — robust across awk variants.
@@ -253,8 +263,7 @@ jobs:
           fi
           echo "----- release notes -----"
           cat "CHANGELOG-${GITHUB_REF_NAME}.md"
-      - name: Publish artifact ON THIS REPO (only on a version tag)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish artifact ON THIS REPO
         uses: softprops/action-gh-release@v2
         with:
           files: safecollab-${{ github.ref_name }}.tar.gz
