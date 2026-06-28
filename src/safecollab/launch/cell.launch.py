@@ -106,15 +106,28 @@ def generate_launch_description():
         [FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"]
     )
 
+    # The world is the project-owned worlds/cell.sdf, NOT the stock empty.sdf.
+    # empty.sdf does not load the gz Sensors system, so the cell camera never
+    # renders and /camera/image stays silent (perception goes blind, safety
+    # fail-safes to 'lost'). cell.sdf is empty.sdf + the Sensors system; see
+    # the header of worlds/cell.sdf and docs/VALIDATE.md.
+    cell_world = PathJoinSubstitution(
+        [FindPackageShare("safecollab"), "worlds", "cell.sdf"]
+    )
+
+    # Headless: --headless-rendering makes the Sensors system render offscreen
+    # via EGL (no X display needed), so the camera produces frames in CI/Docker.
     gz_server = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(gz_sim_launch),
-        launch_arguments={"gz_args": "-s -r empty.sdf"}.items(),
+        launch_arguments={
+            "gz_args": ["-s -r --headless-rendering ", cell_world]
+        }.items(),
         condition=IfCondition(headless),
     )
 
     gz_full = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(gz_sim_launch),
-        launch_arguments={"gz_args": "-r empty.sdf"}.items(),
+        launch_arguments={"gz_args": ["-r ", cell_world]}.items(),
         condition=UnlessCondition(headless),
     )
 
@@ -182,16 +195,16 @@ def generate_launch_description():
             operator_sdf,
             "-name",
             "operator",
-            # Start at the first waypoint of the operator path
-            # (OperatorPath.generate_random waypoint 0: x=0.9, y=±0.65, z=1.10).
-            # Use y=0 as a neutral starting point; human_node repositions on
-            # the first gz-transport tick (~100 ms after node start).
+            # Start near the first waypoint's X/Y (x=0.9) but at the constant
+            # marker height z=_MARKER_Z=0.95 m (human_node holds the marker at
+            # this plane height — see human_node._MARKER_Z / operator.sdf).
+            # human_node repositions it on the first gz-transport tick (~100 ms).
             "-x",
             "0.9",
             "-y",
             "0.0",
             "-z",
-            "1.10",
+            "0.95",
         ],
     )
 

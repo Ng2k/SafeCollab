@@ -10,17 +10,24 @@
   the frame.
 
   MODEL PROPERTIES
-  Static (no physics). 0.25 x 0.25 x 0.30 m box, large enough for the blob
-  detector's min_area_px=100 threshold at all operator path positions
-  (estimated blob area >= 6000 px^2 at max camera distance ~1.5 m).
-  No collision geometry: purely a visual marker.
+  Static (no physics). A FLAT 0.35 x 0.35 x 0.08 m yellow puck — deliberately
+  thin. The overhead camera recovers the operator's planar position by
+  back-projecting the blob centroid onto a single plane (perception_node
+  plane_z_m == human_node._MARKER_Z == 0.95 m). A tall box, viewed at the
+  camera's ~21 deg off-vertical angle, projects a silhouette whose centroid is
+  biased outward (its top face is farther from the camera nadir), corrupting
+  the recovered (x, y). A flat puck centred on the plane has almost no such
+  bias, so the perceived pose tracks the operator across the whole path. The
+  0.35 x 0.35 footprint keeps the blob well above min_area_px=100 at the wider
+  (hfov=1.5) camera. No collision geometry: purely a visual marker.
 
   POSE TRACKING
   cell.launch.py spawns this model at the path start-position
-  (x=0.9, y=0.0, z=1.10).  human_node calls the gz transport service
-  /world/empty/set_pose at 10 Hz to move it in lock-step with the
-  ground-truth operator position.  The world-&gt;human_gt TF is broadcast
-  at 50 Hz independently.
+  (x=0.9, y=0.0, z=0.95).  human_node calls the gz transport service
+  /world/empty/set_pose at 10 Hz to move it in X/Y with the operator while
+  holding z at the constant marker height (_MARKER_Z).  The full 3-D
+  world-&gt;human_gt TF (incl. the reaching hand's z) is broadcast at 50 Hz
+  independently.
 -->
 <sdf version="1.8">
   <model name="operator">
@@ -29,7 +36,7 @@
       <visual name="visual">
         <geometry>
           <box>
-            <size>0.25 0.25 0.30</size>
+            <size>0.35 0.35 0.08</size>
           </box>
         </geometry>
         <material>

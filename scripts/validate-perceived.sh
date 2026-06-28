@@ -175,27 +175,50 @@ fi
 
 # ---- CHECK 3: perceived pose agrees with ground truth -----------------------
 # This is the heart of the validation: the perceived world->human must track the
-# simulator's world->human_gt. We sample both a few times (the operator is
-# moving along its deterministic path) and require the median separation to be
-# within TF_AGREEMENT_TOL.
-read_xyz() {  # $1 = target frame; prints "x y z" or nothing
-    dexec "timeout 5 ros2 run tf2_ros tf2_echo world $1 2>/dev/null \
-        | grep -m1 -A1 Translation | grep -o '\[.*\]' | tr -d '[],'"
-}
+# simulator's world->human_gt.
+#
+# The two poses MUST be sampled near-simultaneously. The operator moves up to
+# ~0.6 m/s, so reading 'human' and then 'human_gt' a second apart (e.g. two
+# back-to-back `tf2_echo` calls) measures how far the operator travelled in that
+# gap, NOT the perception error — it reports a spurious 0.2-0.7 m "divergence"
+# even when perception is spot-on. Instead we subscribe to /tf directly and, on
+# each tick, compare the latest 'human' against the latest 'human_gt' only when
+# both were received within 0.2 s of each other (a true instantaneous snapshot),
+# tracking the minimum separation over a short window.
 if [ "${have_perceived}" -eq 1 ]; then
-    best="999"
-    for _ in 1 2 3 4 5; do
-        p="$(read_xyz human || true)"
-        g="$(read_xyz human_gt || true)"
-        if [ -n "${p}" ] && [ -n "${g}" ]; then
-            d="$(python3 -c "import sys,math
-p=list(map(float,'''$p'''.split())); g=list(map(float,'''$g'''.split()))
-print(math.dist(p,g))" 2>/dev/null || echo 999)"
-            # keep the smallest separation seen (robust to a single bad sample)
-            best="$(python3 -c "print(min(${best}, ${d}))" 2>/dev/null || echo "${best}")"
-        fi
-        sleep 1
-    done
+    best="$(dexec "python3 - <<'PYEOF'
+import math, time
+import rclpy
+from rclpy.node import Node
+from tf2_msgs.msg import TFMessage
+
+WINDOW = 12.0          # seconds to sample
+FRESH = 0.2            # max age difference (s) to treat two TFs as simultaneous
+
+rclpy.init()
+nd = Node('vcheck3')
+cur = {}
+def cb(msg):
+    now = time.time()
+    for tr in msg.transforms:
+        c = tr.child_frame_id
+        if c in ('human', 'human_gt'):
+            t = tr.transform.translation
+            cur[c] = (t.x, t.y, t.z)
+            cur[c + '_t'] = now
+nd.create_subscription(TFMessage, '/tf', cb, 50)
+best = 999.0
+t0 = time.time()
+while time.time() - t0 < WINDOW:
+    rclpy.spin_once(nd, timeout_sec=0.05)
+    if 'human' in cur and 'human_gt' in cur:
+        if abs(cur['human_t'] - cur['human_gt_t']) < FRESH:
+            best = min(best, math.dist(cur['human'], cur['human_gt']))
+print('%.4f' % best)
+rclpy.shutdown()
+PYEOF
+" 2>/dev/null | tail -1)"
+    best="${best:-999}"
     if python3 -c "import sys; sys.exit(0 if ${best} <= ${TF_AGREEMENT_TOL} else 1)" 2>/dev/null; then
         ok "perceived vs ground-truth agree (min separation ${best} m <= ${TF_AGREEMENT_TOL} m)"
     else
@@ -206,13 +229,47 @@ else
 fi
 
 # ---- CHECK 4: the SSM loop reacts to the perceived human --------------------
-# Over OBSERVE_WINDOW seconds, capture /safety/zone and /safety/scale. As the
+# Over OBSERVE_WINDOW seconds, observe /safety/zone and /safety/scale. As the
 # operator approaches, the scale must drop below 1.0 and the zone must leave
 # green. (If perception were dead, fail-safe-on-lost would pin scale at 0 and
 # the zone at 'lost' — which CHECK 2 would already have flagged.)
+#
+# zone and scale MUST be observed in the SAME window. They are two views of one
+# instant (classify() emits 'red'/0.0 and 'yellow'/<1.0 together), so capturing
+# them in back-to-back windows can show a red zone in the first window yet a
+# flat 1.0 scale in the second if the operator's (deterministic-in-sim-time)
+# path lands a green-heavy phase there under variable wall-clock load. A single
+# concurrent subscriber removes that skew and reports what actually co-occurred.
 info "Observing /safety for ${OBSERVE_WINDOW}s while the operator moves…"
-zones="$(dexec "timeout ${OBSERVE_WINDOW} ros2 topic echo /safety/zone --field data 2>/dev/null | sort -u | tr '\n' ' '" || true)"
-scales="$(dexec "timeout ${OBSERVE_WINDOW} ros2 topic echo /safety/scale --field data 2>/dev/null" || true)"
+obs="$(dexec "python3 - <<PYEOF
+import time
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float32, String
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+
+WINDOW = ${OBSERVE_WINDOW}
+rclpy.init()
+nd = Node('vcheck4')
+zones = set()
+min_scale = [1.0e9]
+nd.create_subscription(Float32, '/safety/scale',
+                       lambda m: min_scale.__setitem__(0, min(min_scale[0], m.data)), 10)
+qz = QoSProfile(depth=1)
+qz.durability = DurabilityPolicy.TRANSIENT_LOCAL
+qz.reliability = ReliabilityPolicy.RELIABLE
+nd.create_subscription(String, '/safety/zone', lambda m: zones.add(m.data), qz)
+t0 = time.time()
+while time.time() - t0 < WINDOW:
+    rclpy.spin_once(nd, timeout_sec=0.1)
+# line 1: space-separated zones; line 2: min scale seen
+print(' '.join(sorted(zones)))
+print('%.4f' % (min_scale[0] if min_scale[0] < 1.0e9 else 9.99))
+rclpy.shutdown()
+PYEOF
+" 2>/dev/null)"
+zones="$(printf '%s\n' "${obs}" | sed -n '1p')"
+min_scale="$(printf '%s\n' "${obs}" | sed -n '2p')"
 
 if [ -n "${zones}" ]; then
     info "zones observed: ${zones}"
@@ -228,8 +285,7 @@ else
     bad "no /safety/zone messages captured in the observation window"
 fi
 
-if [ -n "${scales}" ]; then
-    min_scale="$(printf '%s\n' "${scales}" | sort -g | head -1)"
+if [ -n "${min_scale}" ]; then
     if python3 -c "import sys; sys.exit(0 if ${min_scale} < 0.99 else 1)" 2>/dev/null; then
         ok "/safety/scale responded to the human (min ${min_scale} < 1.0)"
     else

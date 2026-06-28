@@ -125,13 +125,14 @@ def _measure_hz(topic, window_s=5.0):
 
     NOTE on what this measures: this is a WALL-CLOCK rate.  ``safety_monitor``'s
     timer fires on sim time (``use_sim_time``), so in a headless CI sim running
-    below real-time this reads ``RTF × 20`` Hz, not 20 Hz (≈15.5 Hz at the
-    observed RTF≈0.78).  A sim-time measurement via an rclpy probe proved
-    unreliable — the single-threaded executor shares the spin with the high-rate
-    ``/clock`` subscription and distorts the sample spacing.  So the assertion
-    that consumes this checks a LIVENESS / near-real-time floor; the exact 20 Hz
-    is guaranteed by the node's timer config (and logged at start-up), not
-    re-derived from a CPU-starved CI sim.
+    below real-time this reads ``RTF × 20`` Hz, not 20 Hz.  With the camera now
+    rendering under software GL the RTF sits around ~0.3–0.5 (see the liveness
+    floor rationale in ``test_safety_topic_rate``).  A sim-time measurement via
+    an rclpy probe proved unreliable — the single-threaded executor shares the
+    spin with the high-rate ``/clock`` subscription and distorts the sample
+    spacing.  So the assertion that consumes this checks a LIVENESS floor; the
+    exact 20 Hz is guaranteed by the node's timer config (and logged at
+    start-up), not re-derived from a CPU-starved CI sim.
     """
     proc = subprocess.Popen(
         ["ros2", "topic", "hz", topic],
@@ -245,14 +246,24 @@ class TestHeadlessBringup(unittest.TestCase):
             self.skipTest("cell not built yet; /safety/scale rate check pending.")
         # safety_monitor publishes /safety/scale on a 20 Hz timer regardless of
         # zone — even in the 'lost' fail-safe state it emits scale=0.0 (see
-        # SafetyMonitorNode._tick).  We assert a LIVENESS / near-real-time floor,
-        # not the exact 20 Hz: the timer fires on SIM time, and the headless CI
-        # sim runs below real-time (RTF≈0.78 observed → ~15.5 Hz wall-clock for a
-        # true 20 Hz timer), with the RTF varying run-to-run under CI load.  An
-        # 8 Hz floor (RTF down to ~0.4) robustly distinguishes a healthy, fast
-        # loop from a stalled or dead one — the real failure mode — without
-        # flaking on the sim's real-time factor.  The 20 Hz design rate is
-        # verified by the node's timer config and its start-up log.
+        # SafetyMonitorNode._tick).  We assert a LIVENESS floor, not the exact
+        # 20 Hz: the timer fires on SIM time, so this WALL-CLOCK reading is
+        # RTF × 20 Hz, and the headless CI sim runs well below real-time.
+        #
+        # Real-time factor depends heavily on what the sim must compute. Since
+        # the overhead camera now actually renders (worlds/cell.sdf loads the gz
+        # Sensors system — required for the live perceived path), the headless CI
+        # sim renders the camera under SOFTWARE GL (no GPU), which dominates the
+        # step cost and pushes the RTF down to ~0.3–0.5 (vs ~0.78 back when no
+        # camera rendered). At RTF 0.3 a true 20 Hz timer reads ~6 Hz wall-clock.
+        #
+        # So the floor is set to 5 Hz: it still cleanly separates a healthy loop
+        # (RTF-throttled but ticking at its full 20 Hz sim-rate) from the real
+        # failure mode — a stalled or dead loop (≈0 Hz) — while tolerating the
+        # camera-render RTF hit and run-to-run CI variance. The 20 Hz design rate
+        # itself is guaranteed by the node's timer config (and logged at
+        # start-up), not re-derived from a CPU-starved, GPU-less CI sim; the
+        # camera rate is kept modest (15 Hz, see urdf/cell.xacro) to preserve RTF.
         rate = _measure_hz("/safety/scale", window_s=5.0)
         self.assertIsNotNone(
             rate,
@@ -261,11 +272,12 @@ class TestHeadlessBringup(unittest.TestCase):
         )
         self.assertGreaterEqual(
             rate,
-            8.0,
-            f"/safety/scale rate {rate:.1f} Hz is below the 8 Hz liveness floor "
+            5.0,
+            f"/safety/scale rate {rate:.1f} Hz is below the 5 Hz liveness floor "
             "(safety_monitor targets 20 Hz sim-time; this wall-clock floor allows "
-            "for the headless CI sim's real-time factor — a lower value means the "
-            "safety loop is stalled, not merely RTF-throttled).",
+            "for the headless CI sim's real-time factor with the camera rendering "
+            "under software GL — a lower value means the safety loop is stalled, "
+            "not merely RTF-throttled).",
         )
 
     def test_tf_chain(self, cell_present):

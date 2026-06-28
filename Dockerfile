@@ -22,6 +22,20 @@ FROM ros:jazzy-ros-base
 # (not a separately-maintained apt list), so a package present here but missing
 # in CI — or vice-versa — cannot happen.
 # ---------------------------------------------------------------------------
+# gz Harmonic Python bindings (gz.transport13 / gz.msgs10) live in the OSRF gz
+# apt repo, not the ROS one (the ROS image ships gz only as C++ vendor packages:
+# ros-jazzy-gz-{transport,msgs}-vendor — no Python module). human_node uses them
+# to move the yellow operator body via the /world/empty/set_pose service. Add the
+# OSRF repo here so the package install below can pull the matching Python debs
+# (13.5.0 / 10.x — same versions as the vendored libs, so dpkg reports 0 removals
+# and no file conflicts).
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && curl -sSL https://packages.osrfoundation.org/gazebo.gpg \
+        -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(. /etc/os-release && echo $VERSION_CODENAME) main" \
+        > /etc/apt/sources.list.d/gazebo-stable.list \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ros-gz-sim \
         ros-jazzy-ros-gz-image \
@@ -38,14 +52,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-opencv \
         python3-pytest \
         python3-pytest-cov \
+        python3-gz-transport13 \
+        python3-gz-msgs10 \
     && rm -rf /var/lib/apt/lists/*
-# NOTE: the gz-transport Python bindings (gz.transport13 / gz.msgs10) are NOT
-# available in the ROS 2 apt repo that this base image ships — they live in the
-# separate OSRF (packages.osrfoundation.org) repo. human_node._set_gz_pose()
-# imports them under a guarded try/except, so without them the yellow operator
-# body simply stays at its spawn position (still visible; world->human_gt TF and
-# the ground-truth safety path are unaffected). Live pose-following needs a
-# validated in-image mechanism — see the TODO in human_node.py.
+# python3-gz-transport13 / python3-gz-msgs10 (from the OSRF repo added above)
+# give human_node._set_gz_pose() the gz.transport13 / gz.msgs10 modules it needs
+# to move the yellow operator body via /world/empty/set_pose, so the overhead
+# camera sees the operator track its path and perception_node can detect it.
+# The import in human_node stays guarded (try/except) so the node still runs if
+# the bindings are ever absent — it just falls back to a static operator body.
 
 # Colcon workspace root. The repository root *is* the workspace: packages live
 # under ./src (see AGENTS.md §5), so COPY . places them at ${ROS_WS}/src.

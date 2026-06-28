@@ -31,17 +31,17 @@ from safecollab.perception_node import (
 
 # Camera optical-frame origin in world (from xacro link chain)
 CAM_X = -0.45
-CAM_Y = 0.35
-CAM_Z = 1.64
+CAM_Y = 0.0
+CAM_Z = 2.40
 
-# mast_to_camera rpy = (0, 1.0, 0)  →  pitch = 1.0 rad
-CAM_PITCH_RAD = 1.0
+# mast_to_camera rpy = (0, 1.2, 0)  →  pitch = 1.2 rad
+CAM_PITCH_RAD = 1.2
 
 # Hand reach plane height (REACH_Z in human_node.py)
 REACH_Z = 0.82
 
-# Intrinsics from cell.xacro: 640×480, hfov = 1.0472 rad (60°)
-_FX, _FY, _CX, _CY = _derive_intrinsics(640, 480, 1.0472)
+# Intrinsics from cell.xacro: 640×480, hfov = 1.5 rad (~86°)
+_FX, _FY, _CX, _CY = _derive_intrinsics(640, 480, 1.5)
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ class TestCamToWorldTransform:
     """Verify cam_to_world_transform() produces the geometrically correct 4×4."""
 
     def test_camera_origin_in_world(self):
-        """Camera optical frame must be at world (-0.45, 0.35, 1.64)."""
+        """Camera optical frame must be at world (-0.45, 0.0, 2.40)."""
         T = cam_to_world_transform(
             cam_x=CAM_X, cam_y=CAM_Y, cam_z=CAM_Z, pitch_rad=CAM_PITCH_RAD
         )
@@ -119,7 +119,7 @@ class TestCamToWorldTransform:
     def test_optical_axis_points_forward_and_downward(self):
         """The optical axis (camera +Z) must have a downward world component.
 
-        With pitch = 1.0 rad the camera tilts forward; the optical axis in world
+        With pitch = 1.2 rad the camera tilts forward; the optical axis in world
         is col-2 of R, which must have a negative world-Z component (pointing
         toward the table) and a positive world-X component (tilted forward toward
         the tray from the mast behind the table).
@@ -141,8 +141,8 @@ class TestCamToWorldTransform:
         world_pt = project_pixel_to_plane(_CX, _CY, intrinsics, T, REACH_Z)
         assert world_pt is not None
         x_w, y_w, z_w = world_pt
-        # Center of view from mast at (-0.45, 0.35) pitched 1.0 rad at height 1.64
-        # should project to roughly (0.0 – 0.15, 0.35) at z=0.82 — positive X.
+        # Center of view from mast at (-0.45, 0.0) pitched 1.2 rad at height 2.40
+        # should project to roughly (0.16, 0.0) at z=0.82 — positive X.
         assert x_w > -0.2, f"view centre x={x_w:.3f} should be near the table"
         assert z_w == pytest.approx(REACH_Z, abs=1e-6)
 
@@ -150,7 +150,7 @@ class TestCamToWorldTransform:
         """Default arguments must reproduce the xacro link-chain camera pose."""
         T_default = cam_to_world_transform()
         T_explicit = cam_to_world_transform(
-            cam_x=-0.45, cam_y=0.35, cam_z=1.64, pitch_rad=1.0
+            cam_x=-0.45, cam_y=0.0, cam_z=2.40, pitch_rad=1.2
         )
         assert T_default == pytest.approx(T_explicit, abs=1e-12)
 
