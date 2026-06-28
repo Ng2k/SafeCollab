@@ -1,0 +1,100 @@
+<?xml version="1.0" ?>
+<!--
+  cell.sdf — SafeCollab simulation world.
+
+  This is the stock gz-sim8 `empty.sdf` (ground plane + sun + the standard
+  Physics / UserCommands / SceneBroadcaster / Contact systems) with ONE
+  addition that the bare empty.sdf lacks:
+
+      <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+
+  WHY THIS FILE EXISTS
+  --------------------
+  gz only renders camera/lidar/depth sensors when the *Sensors* system is
+  loaded in the world. The stock `empty.sdf` does NOT load it, so the cell's
+  down-looking camera (urdf/cell.xacro) was created and its gz topic
+  `camera/image` advertised, but no frames were ever produced — the
+  ros_gz_image bridge had nothing to forward, /camera/image stayed silent,
+  perception_node went blind, and the safety loop sat in the fail-safe `lost`
+  protective stop. (See docs/VALIDATE.md; this is the exact failure the
+  perceived-path validation surfaced.)
+
+  The world name is deliberately kept as "empty" so the gz transport service
+  and topic namespace (e.g. /world/empty/set_pose used by human_node, and the
+  /world/empty/* topics) is unchanged from the previous empty.sdf launch.
+
+  render_engine ogre2 is gz's default; it renders headless via EGL when gz sim
+  is started with --headless-rendering (see launch/cell.launch.py).
+-->
+<sdf version="1.6">
+  <world name="empty">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin
+      filename="gz-sim-physics-system"
+      name="gz::sim::systems::Physics">
+    </plugin>
+    <plugin
+      filename="gz-sim-user-commands-system"
+      name="gz::sim::systems::UserCommands">
+    </plugin>
+    <plugin
+      filename="gz-sim-scene-broadcaster-system"
+      name="gz::sim::systems::SceneBroadcaster">
+    </plugin>
+    <plugin
+      filename="gz-sim-contact-system"
+      name="gz::sim::systems::Contact">
+    </plugin>
+    <!-- The piece empty.sdf is missing: renders the cell camera sensor. -->
+    <plugin
+      filename="gz-sim-sensors-system"
+      name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <specular>0.8 0.8 0.8 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>
