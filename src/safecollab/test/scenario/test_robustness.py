@@ -8,9 +8,13 @@
 # stays green.
 #
 #   AT-6  Randomised operator paths generalise (no path-specific tuning)   [Sprint 1] DONE
-#   AT-4r Recover cleanly from a protective stop triggered mid-trajectory   [Sprint 2]
-#   AT-3r Fast crossing drives red + scale->0 within one control tick       [Sprint 3]
 #   AT-5r Transient detection loss -> fail-safe -> re-acquire -> resume      [Sprint 4]
+#
+# Two P4 cases are pure-logic properties, proven faster and deterministically as
+# UNIT tests rather than live scenarios:
+#   AT-4r mid-trajectory stop resumes without backtrack -> test_motion_node.py
+#   AT-3r fast crossing cannot skip the red band (sampling invariant)
+#                                                  -> test_fast_crossing.py
 #
 # Shared topic-collection / zone-analysis helpers come from the sibling
 # _ssm_harness module (no duplication with the AT-1..AT-5 harness).
@@ -204,16 +208,6 @@ class TestRobustness(unittest.TestCase):
             "resume as the operator retreats; too few means resume does not "
             "generalise across paths.",
         )
-
-    @unittest.skip("P4 Sprint 2: mid-trajectory stop/resume — pending")
-    def test_at4_recover_from_mid_trajectory_stop(self) -> None:
-        """AT-4 hardening: a protective stop triggered BETWEEN waypoints resumes
-        cleanly by re-planning from the current state (no jerk, no backtrack)."""
-
-    @unittest.skip("P4 Sprint 3: fast-crossing reaction — pending")
-    def test_at3_fast_crossing_stops_within_one_tick(self) -> None:
-        """AT-3 hardening: a fast operator crossing drives /safety/zone to red and
-        /safety/scale to 0 within one control tick."""
 
     @unittest.skip("P4 Sprint 4: transient detection loss recovery — pending")
     def test_at5_transient_loss_recovers(self) -> None:

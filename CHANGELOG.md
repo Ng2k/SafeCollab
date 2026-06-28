@@ -46,6 +46,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
   start before going forward. `MotionLogic` now drops nominal waypoints the robot
   has already passed (those no closer to the goal than the current state),
   resuming as `[current, leg_end]` — monotonic progress toward the goal, no jerk.
+- test(safety): **AT-3 hardening** — guard the fast-crossing sampling invariant
+  (`test_fast_crossing.py`): even at the maximum modelled operator speed
+  (`risk.yaml` `v_h`), the per-monitor-tick step (`v_h / SafetyMonitorNode._TICK_HZ`)
+  is well below the red band `[0, d_red]`, so several samples land in red before
+  contact — a fast crossing cannot tunnel through the protective stop between
+  ticks. Inputs are read from the real config/node (no hard-coded thresholds).
 
 ---
 
