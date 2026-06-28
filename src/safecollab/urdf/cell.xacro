@@ -146,7 +146,13 @@
   <gazebo reference="camera_link">
     <sensor name="cell_camera" type="camera">
       <always_on>1</always_on>
-      <update_rate>30</update_rate>
+      <!-- 15 Hz: ample for perception (its ≤100 ms per-frame latency budget is
+           67 ms here) and far cheaper to render than 30 Hz. In headless CI the
+           camera renders under software GL (no GPU); at 30 Hz the render load
+           dragged the sim's real-time factor low enough that the 20 Hz-sim-time
+           safety loop fell below the integration test's wall-clock liveness
+           floor. Halving the render rate restores the RTF headroom. -->
+      <update_rate>15</update_rate>
       <visualize>true</visualize>
       <topic>camera/image</topic>
       <camera>
