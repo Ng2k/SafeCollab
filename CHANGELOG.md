@@ -40,6 +40,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
   zone-vs-scale, concurrently — the previous sequential sampling measured the operator's
   motion between reads (and cross-window phase skew) rather than perception accuracy / the
   co-occurring SSM response, producing spurious failures on a correct system.
+- fix(ci): keep the safety loop above the integration liveness floor now that the camera
+  renders. The headless CI sim renders the camera under software GL, which lowers the
+  real-time factor; lower the camera rate to 15 Hz (urdf/cell.xacro) to recover RTF and
+  recalibrate the `/safety/scale` wall-clock floor (8 → 5 Hz) in `test_bringup.py`. The
+  20 Hz sim-time design rate of the safety loop is unchanged.
+- fix: make every node's `main()` survive the rclpy SIGINT teardown race — the executor
+  can raise `RuntimeError: Unable to convert call argument` from `_take_subscription`
+  while the context is torn down, and `rclpy.ok()` is an unreliable discriminator. Treat
+  that specific take-time error as benign so launch/CI shutdown exit codes stay clean,
+  while still re-raising genuine `RuntimeError`s.
 
 ### Added
 
