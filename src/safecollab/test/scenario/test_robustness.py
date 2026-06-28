@@ -25,7 +25,6 @@ import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 import unittest
 
@@ -41,12 +40,11 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 # launch_test loads this file by path; make its directory importable first.
 sys.path.insert(0, os.path.dirname(__file__))
 from _ssm_harness import (  # noqa: E402  (intentional: after the sys.path tweak)
-    collect_float32_values,
-    collect_string_values,
     compress,
     count_escalations,
     count_recoveries,
     locate_cell_launch,
+    record_safety_topics,
     wait_controllers_active,
 )
 
@@ -149,31 +147,11 @@ class TestRobustness(unittest.TestCase):
             f"within {_CONTROLLER_TIMEOUT:.0f} s of bring-up.",
         )
 
-        # Phase 2 — record zones + scales over several operator cycles.
-        zones: list = []
-        scales: list = []
-
-        def _do_zones() -> None:
-            zones.extend(
-                collect_string_values(
-                    "/safety/zone",
-                    _RECORD_SECONDS,
-                    valid_values={"green", "yellow", "red", "lost"},
-                    transient_local=True,  # §3 contract QoS
-                )
-            )
-
-        def _do_scales() -> None:
-            scales.extend(collect_float32_values("/safety/scale", _RECORD_SECONDS))
-
-        threads = [
-            threading.Thread(target=_do_zones, daemon=True),
-            threading.Thread(target=_do_scales, daemon=True),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=_RECORD_SECONDS + 10.0)
+        # Phase 2 — record zones + scales over several operator cycles with one
+        # in-process rclpy subscriber (QoS matched to the §3 contract).
+        rec = record_safety_topics(_RECORD_SECONDS, zone=True, scale=True)
+        zones = rec["zones"]
+        scales = rec["scales"]
 
         self.assertGreater(
             len(zones), 0, "/safety/zone captured no messages (QoS/monitor issue)."
@@ -253,13 +231,9 @@ class TestRobustness(unittest.TestCase):
         )
         try:
             time.sleep(_AT5_STALE_WAIT)  # past loss_timeout (0.5 s sim) + RTF margin
-            scale_lost = collect_float32_values("/safety/scale", 5.0)
-            zone_lost = collect_string_values(
-                "/safety/zone",
-                3.0,
-                valid_values={"green", "yellow", "red", "lost"},
-                transient_local=True,
-            )
+            stalled = record_safety_topics(5.0, zone=True, scale=True)
+            scale_lost = stalled["scales"]
+            zone_lost = stalled["zones"]
         finally:
             # ALWAYS resume human_node so the loop can recover and teardown is clean.
             subprocess.run(
@@ -270,7 +244,7 @@ class TestRobustness(unittest.TestCase):
 
         # --- Allow the TF to return and the loop to re-acquire, then sample.
         time.sleep(_AT5_RESUME_WAIT)
-        scale_resume = collect_float32_values("/safety/scale", 10.0)
+        scale_resume = record_safety_topics(10.0, scale=True)["scales"]
 
         # Fail-safe held during the loss: scale pinned at 0, zone 'lost'.
         self.assertGreater(

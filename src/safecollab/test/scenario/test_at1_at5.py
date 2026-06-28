@@ -49,11 +49,10 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 # Aliased to the previous private names so the test bodies below are unchanged.
 sys.path.insert(0, os.path.dirname(__file__))
 from _ssm_harness import (  # noqa: E402  (intentional: after the sys.path tweak)
-    collect_float32_values as _collect_float32_values,
-    collect_string_values as _collect_string_values,
     compress as _compress,
     is_subsequence as _is_subsequence,
     locate_cell_launch as _locate_cell_launch,
+    record_safety_topics as _record_safety_topics,
     topic_has_messages as _topic_has_messages,
     wait_controllers_active as _wait_controllers_active,
 )
@@ -147,40 +146,16 @@ class TestSSMScenario(unittest.TestCase):
         )
 
         # ------------------------------------------------------------------
-        # Phase 2 — record /safety/scale, /safety/zone, /arm_controller/joint_trajectory
+        # Phase 2 — record /safety/scale, /safety/zone, /safety/min_distance,
+        #           and check /arm_controller/joint_trajectory
         # ------------------------------------------------------------------
-        # Three independent subprocess collectors run in parallel for _RECORD_SECONDS.
-        # • scales: Float32 samples at ~20 Hz → ~1800 samples over 90 s
-        # • zones:  String samples (green|yellow|red|lost) at ~20 Hz → ~1800 samples
-        # • arm_traj_seen: bool — did /arm_controller/joint_trajectory publish at all?
-        scales: list = []
-        zones: list = []
-        min_dists: list = []
+        # One in-process rclpy subscriber records the three /safety topics for
+        # _RECORD_SECONDS (~1800 samples each at 20 Hz), with QoS matched to each
+        # topic's §3 contract — this is deterministic where the old concurrent
+        # `ros2 topic echo` subprocesses could lose the transient_local discovery
+        # race and capture nothing. The volatile /arm_controller/joint_trajectory
+        # presence check runs concurrently in a thread (a plain subprocess).
         arm_traj_seen: list = [False]  # mutable container for thread result
-
-        def _do_scales() -> None:
-            scales.extend(_collect_float32_values("/safety/scale", _RECORD_SECONDS))
-
-        def _do_min_dist() -> None:
-            # /safety/min_distance is published best-effort (§3 contract) — the
-            # echo subscriber must match, or it captures nothing.  Diagnostic
-            # only: surfaces how close the operator and arm actually got.
-            min_dists.extend(
-                _collect_float32_values(
-                    "/safety/min_distance", _RECORD_SECONDS, best_effort=True
-                )
-            )
-
-        def _do_zones() -> None:
-            zones.extend(
-                _collect_string_values(
-                    "/safety/zone",
-                    _RECORD_SECONDS,
-                    valid_values={"green", "yellow", "red", "lost"},
-                    # §3 contract: /safety/zone is reliable + transient_local.
-                    transient_local=True,
-                )
-            )
 
         def _do_arm_traj() -> None:
             # A single message within _RECORD_SECONDS is sufficient to confirm
@@ -190,16 +165,15 @@ class TestSSMScenario(unittest.TestCase):
                 window_s=_RECORD_SECONDS,
             )
 
-        threads = [
-            threading.Thread(target=_do_scales, daemon=True),
-            threading.Thread(target=_do_zones, daemon=True),
-            threading.Thread(target=_do_min_dist, daemon=True),
-            threading.Thread(target=_do_arm_traj, daemon=True),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=_RECORD_SECONDS + 10.0)
+        arm_thread = threading.Thread(target=_do_arm_traj, daemon=True)
+        arm_thread.start()
+        rec = _record_safety_topics(
+            _RECORD_SECONDS, zone=True, scale=True, min_distance=True
+        )
+        arm_thread.join(timeout=10.0)
+        scales = rec["scales"]
+        zones = rec["zones"]
+        min_dists = rec["min_dists"]
 
         # Sanity: both primary topics must have published something.
         self.assertGreater(
@@ -335,7 +309,7 @@ class TestSSMScenario(unittest.TestCase):
         time.sleep(_AT5_STALE_WAIT)
 
         # Collect a 5 s window of scale samples; all must be ≈ 0 (fail-safe active).
-        scale_at5 = _collect_float32_values("/safety/scale", 5.0)
+        scale_at5 = _record_safety_topics(5.0, scale=True)["scales"]
 
         # Resume human_node BEFORE asserting so teardown stays clean even on failure.
         subprocess.run(

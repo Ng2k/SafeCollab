@@ -1,17 +1,14 @@
 # SafeCollab — shared helpers for the scenario (launch_testing) harnesses.
 #
-# Extracted verbatim from the AT-1..AT-5 harness so the AT-1..AT-5 (test_at1_at5)
-# and the P4 robustness (test_robustness) harnesses share one implementation
-# instead of duplicating ~150 lines of topic-collection plumbing. This module is
-# NOT a test file (leading underscore; no test_* names) so neither pytest nor
-# launch_test collects it directly.
+# Shared by the AT-1..AT-5 (test_at1_at5) and the P4 robustness (test_robustness)
+# harnesses so they use one implementation instead of duplicating the plumbing.
+# This module is NOT a test file (leading underscore; no test_* names) so neither
+# pytest nor launch_test collects it directly.
 #
 # OWNED BY: Stream G / the scenario harnesses.
 
 import os
-import queue
 import subprocess
-import threading
 import time
 
 
@@ -38,131 +35,92 @@ def locate_cell_launch():
 
 
 # ---------------------------------------------------------------------------
-# Topic-collection helpers
+# Topic recording — single in-process rclpy subscriber
 # ---------------------------------------------------------------------------
 
 
-def collect_float32_values(
-    topic: str, duration_s: float, best_effort: bool = False
-) -> list:
-    """Collect std_msgs/Float32 data values from *topic* for *duration_s* seconds.
-
-    Spawns ``ros2 topic echo topic`` and reads its output via a daemon thread so
-    that ``readline()`` never blocks the outer deadline check.  Returns a list of
-    floats.
-
-    *best_effort* makes the echo subscriber request BEST_EFFORT reliability,
-    required for topics the §3 contract publishes best-effort (e.g.
-    ``/safety/min_distance``): a default RELIABLE echo subscriber is QoS-
-    incompatible with a BEST_EFFORT publisher and would capture nothing.
-    """
-    cmd = ["ros2", "topic", "echo", topic]
-    if best_effort:
-        cmd += ["--qos-reliability", "best_effort"]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    values: list = []
-    lq: queue.Queue = queue.Queue()
-
-    def _reader() -> None:
-        for line in proc.stdout:
-            lq.put(line)
-
-    threading.Thread(target=_reader, daemon=True).start()
-
-    deadline = time.monotonic() + duration_s
-    while time.monotonic() < deadline:
-        try:
-            line = lq.get(timeout=0.1)
-        except queue.Empty:
-            continue
-        if line.startswith("data: "):
-            try:
-                values.append(float(line[6:].strip()))
-            except ValueError:
-                pass
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=5.0)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-    return values
-
-
-def collect_string_values(
-    topic: str,
+def record_safety_topics(
     duration_s: float,
-    valid_values: "set | None" = None,
-    transient_local: bool = False,
-) -> list:
-    """Collect std_msgs/String data values from *topic* for *duration_s* seconds.
+    *,
+    zone: bool = False,
+    scale: bool = False,
+    min_distance: bool = False,
+) -> dict:
+    """Record /safety topics for *duration_s* via one in-process rclpy node.
 
-    If *valid_values* is provided only strings in that set are kept (filters YAML
-    boilerplate).  Surrounding quotes are stripped for robustness across ROS echo
-    formats.
+    Returns ``{"zones": [...], "scales": [...], "min_dists": [...]}``; only the
+    requested lists are populated.
 
-    *transient_local* makes the echo subscriber request a RELIABLE +
-    TRANSIENT_LOCAL QoS profile.  This is required for topics the §3 contract
-    declares transient_local (e.g. ``/safety/zone``): ``ros2 topic echo`` uses a
-    VOLATILE subscription by default, which does not reliably receive from a
-    TRANSIENT_LOCAL publisher in this RMW — the symptom is an empty capture even
-    though the topic is being published every tick.  Matching the publisher's
-    durability fixes it (and also delivers the latched last sample on connect).
+    Why rclpy instead of ``ros2 topic echo``: the CLI echo of the reliable +
+    TRANSIENT_LOCAL ``/safety/zone`` can lose the DDS discovery race under load
+    and capture nothing — an empty ``/safety/zone`` while ``/safety/scale`` on the
+    same tick is fine (the exact flake this replaces). A single in-process
+    subscriber with QoS matched to each topic's §3 contract is deterministic and
+    avoids spawning several concurrent echo subprocesses.
     """
-    cmd = ["ros2", "topic", "echo", topic]
-    if transient_local:
-        cmd += [
-            "--qos-reliability",
-            "reliable",
-            "--qos-durability",
-            "transient_local",
-        ]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
+    import rclpy
+    from rclpy.node import Node
+    from rclpy.qos import (
+        DurabilityPolicy,
+        HistoryPolicy,
+        QoSProfile,
+        ReliabilityPolicy,
     )
-    values: list = []
-    lq: queue.Queue = queue.Queue()
+    from std_msgs.msg import Float32, String
 
-    def _reader() -> None:
-        for line in proc.stdout:
-            lq.put(line)
+    if not rclpy.ok():
+        rclpy.init()
+    node = Node("ssm_topic_recorder")
+    out: dict = {"zones": [], "scales": [], "min_dists": []}
 
-    threading.Thread(target=_reader, daemon=True).start()
+    if scale:
+        # /safety/scale — reliable (§3 contract).
+        node.create_subscription(
+            Float32, "/safety/scale", lambda m: out["scales"].append(m.data), 10
+        )
+    if zone:
+        # /safety/zone — reliable + transient_local (§3 contract). Matching the
+        # publisher's durability is what makes the capture reliable here.
+        zone_qos = QoSProfile(
+            depth=1,
+            history=HistoryPolicy.KEEP_LAST,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        node.create_subscription(
+            String, "/safety/zone", lambda m: out["zones"].append(m.data), zone_qos
+        )
+    if min_distance:
+        # /safety/min_distance — best-effort (§3 contract).
+        be_qos = QoSProfile(
+            depth=10,
+            history=HistoryPolicy.KEEP_LAST,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
+        node.create_subscription(
+            Float32,
+            "/safety/min_distance",
+            lambda m: out["min_dists"].append(m.data),
+            be_qos,
+        )
 
     deadline = time.monotonic() + duration_s
-    while time.monotonic() < deadline:
-        try:
-            line = lq.get(timeout=0.1)
-        except queue.Empty:
-            continue
-        if line.startswith("data: "):
-            val = line[6:].strip().strip("'\"")
-            if valid_values is None or val in valid_values:
-                values.append(val)
-
-    proc.terminate()
     try:
-        proc.wait(timeout=5.0)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-    return values
+        while time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=0.1)
+    finally:
+        node.destroy_node()
+    # Note: deliberately not calling rclpy.shutdown() — the context is left up so
+    # repeated calls within one test work; the test process exit cleans it up.
+    return out
 
 
 def topic_has_messages(topic: str, window_s: float = 15.0) -> bool:
     """Return True if *topic* receives at least one message within *window_s* s.
 
     Uses ``ros2 topic echo --once`` which exits with code 0 after the first
-    message arrives; code 1 / TimeoutExpired means nothing arrived.
+    message arrives; code 1 / TimeoutExpired means nothing arrived. Used for the
+    volatile ``/arm_controller/joint_trajectory`` presence check.
     """
     proc = subprocess.Popen(
         ["ros2", "topic", "echo", "--once", topic],

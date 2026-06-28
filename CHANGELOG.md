@@ -82,6 +82,13 @@ live scenario). See `docs/ROBUSTNESS.md`.
 - fix(scenario): restore `import threading` in the AT-1..AT-5 harness — the
   helper extraction dropped it while the test body still uses `threading.Thread`
   for its parallel collectors (a runtime `NameError` the import-time check missed).
+- fix(scenario): record the `/safety` topics with a single in-process rclpy
+  subscriber (`record_safety_topics`) instead of concurrent `ros2 topic echo`
+  subprocesses. The CLI echo of the reliable+transient_local `/safety/zone`
+  intermittently lost the DDS discovery race under load and captured nothing
+  (failing AT-1/AT-2 with an empty zone stream while `/safety/scale` on the same
+  tick was fine); the in-process subscriber with QoS matched to the §3 contract
+  is deterministic.
 
 **Verification:** 264 unit tests passing, total coverage 97.4% (≥ 90 % gate on
 safety/risk); `ruff check` + `ruff format --check` clean; the AT-1..AT-5 and the
