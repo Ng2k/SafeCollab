@@ -176,6 +176,14 @@ jobs:
           # so teardown is clean (matches the integration job exactly).
           docker run --rm --init safecollab:ci \
             launch_test src/safecollab/test/scenario/test_at1_at5.py
+          # P4 robustness acceptance harness (AT-6 + AT-3/4/5 hardening). Reuses
+          # the image just built; self-skips gracefully until the file lands.
+          if [ -f "src/safecollab/test/scenario/test_robustness.py" ]; then
+            docker run --rm --init safecollab:ci \
+              launch_test src/safecollab/test/scenario/test_robustness.py
+          else
+            echo "::notice::test_robustness.py not present yet — P4 harness is wired and ready."
+          fi
 
   # 5) PACKAGE — build the deploy image; verify it launches headless (§7.5).
   package:

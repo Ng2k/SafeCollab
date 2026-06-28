@@ -17,7 +17,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
-- _(work in progress toward the next tag)_
+### Added
+
+- test(scenario): P4 robustness acceptance harness scaffold
+  (`test/scenario/test_robustness.py`) wired into the CI `scenario` stage — the
+  four cases (AT-6 path generalisation, mid-trajectory resume, fast-crossing
+  reaction, transient-loss recovery) are pending and land one per sprint
+  (see `docs/ROADMAP-P4.md`).
+- docs(roadmap): `docs/ROADMAP-P4.md` — TDD/agile task breakdown for the P4
+  robustness phase (→ v0.4.0).
 
 ---
 
