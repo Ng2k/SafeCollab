@@ -17,6 +17,62 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
+- _(work in progress toward the next tag)_
+
+---
+
+## [0.3.0] - 2026-06-28 — P2–P3: perception-driven human + closed safety loop
+
+The **perceived** Speed-and-Separation-Monitoring path now runs end-to-end live: a
+simulated overhead camera detects the operator, `perception_node` estimates its pose with
+an explicit uncertainty σ, and `safety_monitor` scales robot speed by zone
+(green → yellow → red) with a fail-safe on lost detection. `scripts/validate-perceived.sh`
+passes all checks live (perceived vs ground-truth agree to ~1 cm; zones reach yellow/red as
+the operator approaches; `/safety/scale` drops to 0 on breach). This closes the headline
+demo's Definition of Done #5 — the perceived human, not the ground-truth shortcut, drives
+the SSM loop.
+
+### Added
+
+- feat(perception): `perception_node` (Stream C) — classical-CV (HSV colour-blob) operator
+  detection over `/camera/image`, pinhole back-projection geometry (pixel → ray → world-plane
+  intersection, unit-tested sub-mm), broadcasts the perceived `world→human` TF and publishes
+  `/human/uncertainty` (σ, m). A loss-timeout stops the broadcast so downstream sees the
+  fail-safe.
+- feat(safety): `safety_monitor` + `SafetyMonitorLogic` + `config/safety.yaml` (Stream F) —
+  sweeps minimum separation over the robot frames (TCP / link_6 / link_3) against the
+  perceived human, classifies the ISO/TS 15066 risk zone, and publishes `/safety/scale`,
+  `/safety/zone`, `/safety/min_distance`. Fail-safe to (`lost`, 0.0) on stale/absent
+  perceived TF.
+- feat(launch): `cell.launch.py` (Stream G) assembles the full closed loop — gz sim + world
+  + `robot_state_publisher` + spawn + controllers + camera/clock bridges + the five
+  application nodes — with `headless:=true` for CI; bridges gz `/clock` → ROS so every
+  `use_sim_time` node shares sim time.
+- feat(safety): `safety_source` launch toggle — `perceived` (headline demo) or
+  `ground_truth` fallback (AGENTS §11 cut-scope #4), so the ramp / stop / resume / fail-safe
+  can be demonstrated even if perception is unavailable.
+- feat(sim): a camera-visible yellow operator body, moved in gz by `human_node` via the
+  `/world/empty/set_pose` service so the live camera path can detect the operator without a
+  physical person; the full 3-D ground truth is still broadcast on `world→human_gt`.
+- feat(sim): `worlds/cell.sdf` (stock `empty.sdf` + the gz Sensors system) so the overhead
+  camera renders, installed via `setup.py`.
+- test(scenario): AT-1..AT-5 ground-truth scenario harness (`test/scenario`) and headless
+  integration bring-up assertions (controllers active, `/safety/scale` liveness, TF chain).
+- docs(validate): `docs/VALIDATE.md` + `scripts/validate-perceived.sh` — live end-to-end
+  validation of the perceived path (camera → perception → SSM).
+
+### Changed
+
+- The overhead camera is mounted higher, centred, and wider (world z 2.40 m, pitch 1.2 rad,
+  hfov 1.5, 15 Hz) so its FOV covers the whole operator working volume; `perception_node`'s
+  calibration mirrors the mast pose and back-projects onto the operator's constant
+  working-height plane (0.95 m), with a flat marker held at that plane so the recovered
+  planar pose is parallax-free.
+- deps: `opencv-python` → `opencv-python-headless` for CI / Docker compatibility.
+- ci: the integration `launch_test` runs inside the deploy image; the `/safety/scale` check
+  asserts a wall-clock liveness floor (the 20 Hz design rate is sim-time), recalibrated to
+  5 Hz now that the camera renders under software GL.
+
 ### Fixed
 
 - fix(build): install the gz Harmonic Python bindings (`python3-gz-transport13`,
@@ -50,10 +106,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
   while the context is torn down, and `rclpy.ok()` is an unreliable discriminator. Treat
   that specific take-time error as benign so launch/CI shutdown exit codes stay clean,
   while still re-raising genuine `RuntimeError`s.
+- fix(task): solve the kitting poses so the arm reaches the workspace at table height.
+- fix(scenario): match the `/safety/zone` `transient_local` QoS in the recorder and assert
+  zone ordering as a subsequence (not a fixed first-index).
+- fix(packaging): install node executables to `lib/safecollab` (`setup.cfg`) and restore the
+  urdf/config `data_files` lost in an earlier `setup.py` merge.
+- chore(ci): bring the headless build / integration / package stages green — install the
+  ros-gz/control deps, run the headless launch under `docker --init` for clean teardown,
+  resolve a pytest plugin-autoload conflict, and run the integration test inside the deploy
+  image.
 
-### Added
+**Verification:** 258/258 unit tests passing; full CI pipeline (lint, build, unit + coverage
+≥ 90 % on safety/risk, integration, package, deliver) green on GitHub Actions;
+`scripts/validate-perceived.sh` → 7/7 checks passing live (camera → perception → SSM).
 
-- _(work in progress toward the next tag)_
+**Artifact:** `safecollab-v0.3.0.tar.gz` (published on the repo Releases page).
 
 ---
 
@@ -154,13 +221,13 @@ the `ros:jazzy-ros-base` container.
 |---|---|---|
 | ~~`v0.1.0`~~ | P0 | ~~Foundation + CI; pure safety/risk core (TDD)~~ — **released above** |
 | ~~`v0.2.0`~~ | P1 | ~~Collaborative kitting loop~~ — **released above (+ motion layer)** |
-| `v0.3.0` | P2 | Perception-driven human (TF + uncertainty) |
-| `v0.4.0` | P3 | Safety loop closed (zones, stop, resume, fail-safe) |
-| `v0.5.0` | P4 | Robustness (randomised paths, recovery, edge cases) |
-| `v0.6.0` | P5 | Polish + demo video / GIF |
-| `v0.7.0` | P6 | Documentation (README, diagrams, risk note) |
+| ~~`v0.3.0`~~ | P2–P3 | ~~Perception-driven human + safety loop closed (zones, stop, resume, fail-safe)~~ — **released above** |
+| `v0.4.0` | P4 | Robustness (randomised paths, recovery, edge cases) |
+| `v0.5.0` | P5 | Polish + demo video / GIF |
+| `v0.6.0` | P6 | Documentation (README, diagrams, risk note) |
 | **`v1.0.0`** | **submission** | **Acceptance AT-1…AT-5 passing; final image artifact + notes** |
 
-[Unreleased]: https://github.com/<owner>/safecollab/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/<owner>/safecollab/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/<owner>/safecollab/releases/tag/v0.3.0
 [0.2.0]: https://github.com/<owner>/safecollab/releases/tag/v0.2.0
 [0.1.0]: https://github.com/<owner>/safecollab/releases/tag/v0.1.0
