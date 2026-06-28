@@ -29,6 +29,11 @@ setup(
         # launch files -- required so FindPackageShare('safecollab') resolves them
         # after `colcon build`.
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
+        # world files -- cell.sdf must be installed so cell.launch.py can resolve
+        # FindPackageShare('safecollab')/worlds/cell.sdf. cell.sdf adds the gz
+        # Sensors system that the stock empty.sdf omits (without it the camera
+        # never renders); see worlds/cell.sdf header and docs/VALIDATE.md.
+        (os.path.join("share", package_name, "worlds"), glob("worlds/*.sdf")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
