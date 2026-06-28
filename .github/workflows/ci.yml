@@ -66,16 +66,9 @@ jobs:
         run: |
           source /opt/ros/${ROS_DISTRO}/setup.bash
           colcon build --symlink-install
-      - name: Upload build/install overlay (tags only — saves CI artifact storage)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v6
-        with:
-          name: colcon-overlay
-          path: |
-            build/
-            install/
-          if-no-files-found: ignore
-          retention-days: 1
+      # No actions/upload-artifact for the colcon overlay: nothing downstream
+      # consumes it (the unit/integration jobs rebuild inside the deploy image),
+      # so a workflow-artifact copy only consumed the Actions storage quota.
 
   # 3) UNIT (+coverage gate) — pytest --cov=safecollab --cov-fail-under=90 on
   #    the safety & risk modules (AGENTS.md §2, §7.3). Self-skips until Stream B.
@@ -242,12 +235,9 @@ jobs:
         run: |
           docker save safecollab:${{ steps.meta.outputs.tag }} \
             | gzip > safecollab-${{ steps.meta.outputs.tag }}.tar.gz
-      - name: Upload the release tarball as a workflow artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: safecollab-image-${{ steps.meta.outputs.tag }}
-          path: safecollab-${{ steps.meta.outputs.tag }}.tar.gz
-          retention-days: 14
+      # No actions/upload-artifact here: the tarball is published as the GitHub
+      # Release asset below (the deploy artifact per AGENTS.md §7.6). A workflow-
+      # artifact copy would be redundant and consume the Actions storage quota.
       - name: Slice the changelog for this version
         run: |
           version="${GITHUB_REF_NAME#v}"
