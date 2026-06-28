@@ -41,9 +41,13 @@ live scenario). See `docs/ROBUSTNESS.md`.
   path-specific tuning) and that the zone never spuriously enters `lost`.
 - test(scenario): **AT-5 hardening** — transient detection loss recovery. In the
   same robustness bring-up, `human_node` is SIGSTOP'd so the human TF goes stale:
-  the monitor must fail-safe (zone `lost`, scale 0); on SIGCONT the loop must
-  re-acquire and resume (scale recovers) with no node faulting (asserted by the
-  post-shutdown exit-code check). Runs after AT-6 so it cannot perturb it.
+  the monitor must fail-safe (zone `lost`, scale 0); on SIGCONT the zone must
+  leave `lost` (re-acquire, no permanent latch) and the protective stop must lift
+  (scale rises above the stop floor), with no node faulting (asserted by the
+  post-shutdown exit-code check). The recovery check is position-independent — it
+  does not require a specific scale, since where the operator is when re-acquired
+  depends on freeze-duration × real-time factor. Runs after AT-6 so it cannot
+  perturb it.
 - test(scenario): P4 robustness acceptance harness
   (`test/scenario/test_robustness.py`) wired into the CI `scenario` stage,
   holding the live robustness cases (AT-6, AT-5r); the pure-logic cases (AT-4r,

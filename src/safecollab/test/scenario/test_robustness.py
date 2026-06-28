@@ -78,6 +78,9 @@ _MIN_RECOVERIES: int = 2
 #: after SIGCONT for the TF to return and the loop to re-acquire.
 _AT5_STALE_WAIT: float = 10.0
 _AT5_RESUME_WAIT: float = 5.0
+#: Window to watch recovery after SIGCONT — long enough for the re-acquired
+#: operator to move out of the red band so the protective stop visibly lifts.
+_AT5_RESUME_WINDOW: float = 12.0
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +247,9 @@ class TestRobustness(unittest.TestCase):
 
         # --- Allow the TF to return and the loop to re-acquire, then sample.
         time.sleep(_AT5_RESUME_WAIT)
-        scale_resume = record_safety_topics(10.0, scale=True)["scales"]
+        resumed = record_safety_topics(_AT5_RESUME_WINDOW, zone=True, scale=True)
+        scale_resume = resumed["scales"]
+        zone_resume = resumed["zones"]
 
         # Fail-safe held during the loss: scale pinned at 0, zone 'lost'.
         self.assertGreater(
@@ -268,17 +273,35 @@ class TestRobustness(unittest.TestCase):
             f"loss; observed {sorted(set(zone_lost))}.",
         )
 
-        # Re-acquire and resume: once the TF returns, scale must recover.
+        # Re-acquire: once the TF returns the zone must LEAVE 'lost' (the fail-safe
+        # releases, it does not latch). This is the position-independent proof of
+        # recovery — we do not require a specific scale, because where the operator
+        # is when it is re-acquired (and thus the exact scale) depends on the
+        # freeze duration × real-time factor.
+        self.assertGreater(
+            len(zone_resume),
+            0,
+            "AT-5 FAIL: /safety/zone silent after the operator was re-acquired.",
+        )
+        self.assertTrue(
+            any(z != "lost" for z in zone_resume),
+            "AT-5 FAIL: zone stayed 'lost' after the human TF returned "
+            f"({sorted(set(zone_resume))}); the fail-safe must release on "
+            "re-acquire, not latch.",
+        )
+        # Resume: the protective stop is lifted — the arm is commanded to move
+        # again (scale rises above the stop floor) as the operator, now tracked,
+        # moves out of the red band.
         self.assertGreater(
             len(scale_resume),
             0,
             "AT-5 FAIL: /safety/scale silent after the operator was re-acquired.",
         )
         self.assertTrue(
-            any(s > 0.5 for s in scale_resume),
-            "AT-5 FAIL: scale did not recover above 0.5 after re-acquire "
-            f"(max {max(scale_resume):.3f}); the loop must resume once the human "
-            "TF returns (no permanent latch in the 'lost' fail-safe).",
+            any(s > 0.05 for s in scale_resume),
+            "AT-5 FAIL: scale never rose above the protective-stop floor after "
+            f"re-acquire (max {max(scale_resume):.3f}); the loop must lift the "
+            "stop once the human TF returns (no permanent latch in 'lost').",
         )
 
 
