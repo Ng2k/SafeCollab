@@ -237,7 +237,9 @@ def count_escalations(transitions: list) -> int:
     return count
 
 
-def count_recoveries(scales: list, stop_below: float = 0.05, resume_above: float = 0.5) -> int:
+def count_recoveries(
+    scales: list, stop_below: float = 0.05, resume_above: float = 0.5
+) -> int:
     """Count protective-stop → resume cycles in a /safety/scale stream.
 
     A recovery is a transition from a stopped sample (``scale < stop_below``) to a
