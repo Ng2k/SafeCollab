@@ -509,7 +509,8 @@ def main(args=None):  # pragma: no cover
                     target = self._gz_target
                 if target is not None:
                     self._set_gz_pose(*target)
-                time.sleep(0.05)  # ~20 Hz best-effort; well above the 10 Hz need
+                time.sleep(0.1)  # ~10 Hz best-effort — enough for smooth visual
+                # tracking while keeping gz-service load (and headless CPU) low.
 
         def _set_gz_pose(self, x: float, y: float, z: float) -> None:
             """Move the yellow operator gz entity to ``(x, y, z)`` via set_pose.
@@ -550,12 +551,15 @@ def main(args=None):  # pragma: no cover
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    except RuntimeError:
+    except RuntimeError as exc:
         # Teardown race: rclpy's executor can raise from take_message (e.g. on
         # the /clock subscription that use_sim_time creates) if it is mid-take
-        # when the SIGINT handler shuts the context down. Benign once the
-        # context is already gone; re-raise otherwise so real errors surface.
-        if rclpy.ok():
+        # when the SIGINT handler shuts the context down. It surfaces as a pybind
+        # "Unable to convert call argument" error from _take_subscription.
+        # rclpy.ok() is an unreliable discriminator (it can still report True for
+        # a tick during teardown), so also treat that specific take-time error as
+        # benign; re-raise anything else so real bugs still surface.
+        if rclpy.ok() and "convert call argument" not in str(exc):
             raise
     finally:
         node.destroy_node()
