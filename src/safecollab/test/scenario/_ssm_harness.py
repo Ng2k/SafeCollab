@@ -45,18 +45,22 @@ def record_safety_topics(
     zone: bool = False,
     scale: bool = False,
     min_distance: bool = False,
+    arm_traj: bool = False,
 ) -> dict:
-    """Record /safety topics for *duration_s* via one in-process rclpy node.
+    """Record cell topics for *duration_s* via one in-process rclpy node.
 
-    Returns ``{"zones": [...], "scales": [...], "min_dists": [...]}``; only the
-    requested lists are populated.
+    Returns ``{"zones": [...], "scales": [...], "min_dists": [...],
+    "arm_traj_count": int}``; only the requested entries are populated
+    (``arm_traj_count`` is the number of ``/arm_controller/joint_trajectory``
+    messages seen).
 
     Why rclpy instead of ``ros2 topic echo``: the CLI echo of the reliable +
     TRANSIENT_LOCAL ``/safety/zone`` can lose the DDS discovery race under load
     and capture nothing — an empty ``/safety/zone`` while ``/safety/scale`` on the
-    same tick is fine (the exact flake this replaces). A single in-process
-    subscriber with QoS matched to each topic's §3 contract is deterministic and
-    avoids spawning several concurrent echo subprocesses.
+    same tick is fine (the exact flake this replaces). The same race could leave
+    the ``ros2 topic echo --once`` arm-trajectory presence check empty. A single
+    in-process subscriber with QoS matched to each topic's contract is
+    deterministic and avoids spawning concurrent echo subprocesses.
     """
     import rclpy
     from rclpy.node import Node
@@ -67,11 +71,12 @@ def record_safety_topics(
         ReliabilityPolicy,
     )
     from std_msgs.msg import Float32, String
+    from trajectory_msgs.msg import JointTrajectory
 
     if not rclpy.ok():
         rclpy.init()
     node = Node("ssm_topic_recorder")
-    out: dict = {"zones": [], "scales": [], "min_dists": []}
+    out: dict = {"zones": [], "scales": [], "min_dists": [], "arm_traj_count": 0}
 
     if scale:
         # /safety/scale — reliable (§3 contract).
@@ -103,6 +108,15 @@ def record_safety_topics(
             lambda m: out["min_dists"].append(m.data),
             be_qos,
         )
+    if arm_traj:
+        # /arm_controller/joint_trajectory — motion_node publishes reliable,
+        # KEEP_LAST, depth 10 (see motion_node). We only need the count (presence).
+        def _bump(_m):
+            out["arm_traj_count"] += 1
+
+        node.create_subscription(
+            JointTrajectory, "/arm_controller/joint_trajectory", _bump, 10
+        )
 
     deadline = time.monotonic() + duration_s
     try:
@@ -113,28 +127,6 @@ def record_safety_topics(
     # Note: deliberately not calling rclpy.shutdown() — the context is left up so
     # repeated calls within one test work; the test process exit cleans it up.
     return out
-
-
-def topic_has_messages(topic: str, window_s: float = 15.0) -> bool:
-    """Return True if *topic* receives at least one message within *window_s* s.
-
-    Uses ``ros2 topic echo --once`` which exits with code 0 after the first
-    message arrives; code 1 / TimeoutExpired means nothing arrived. Used for the
-    volatile ``/arm_controller/joint_trajectory`` presence check.
-    """
-    proc = subprocess.Popen(
-        ["ros2", "topic", "echo", "--once", topic],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    try:
-        proc.wait(timeout=window_s)
-        return proc.returncode == 0
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        return False
 
 
 # ---------------------------------------------------------------------------

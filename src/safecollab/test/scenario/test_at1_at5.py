@@ -31,7 +31,6 @@ import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 import unittest
 
@@ -53,7 +52,6 @@ from _ssm_harness import (  # noqa: E402  (intentional: after the sys.path tweak
     is_subsequence as _is_subsequence,
     locate_cell_launch as _locate_cell_launch,
     record_safety_topics as _record_safety_topics,
-    topic_has_messages as _topic_has_messages,
     wait_controllers_active as _wait_controllers_active,
 )
 
@@ -149,31 +147,19 @@ class TestSSMScenario(unittest.TestCase):
         # Phase 2 — record /safety/scale, /safety/zone, /safety/min_distance,
         #           and check /arm_controller/joint_trajectory
         # ------------------------------------------------------------------
-        # One in-process rclpy subscriber records the three /safety topics for
-        # _RECORD_SECONDS (~1800 samples each at 20 Hz), with QoS matched to each
-        # topic's §3 contract — this is deterministic where the old concurrent
-        # `ros2 topic echo` subprocesses could lose the transient_local discovery
-        # race and capture nothing. The volatile /arm_controller/joint_trajectory
-        # presence check runs concurrently in a thread (a plain subprocess).
-        arm_traj_seen: list = [False]  # mutable container for thread result
-
-        def _do_arm_traj() -> None:
-            # A single message within _RECORD_SECONDS is sufficient to confirm
-            # motion_node is producing re-timed trajectory commands.
-            arm_traj_seen[0] = _topic_has_messages(
-                "/arm_controller/joint_trajectory",
-                window_s=_RECORD_SECONDS,
-            )
-
-        arm_thread = threading.Thread(target=_do_arm_traj, daemon=True)
-        arm_thread.start()
+        # One in-process rclpy subscriber records all four topics for
+        # _RECORD_SECONDS (~1800 samples each at 20 Hz for the /safety topics),
+        # with QoS matched to each topic's contract — deterministic where the old
+        # concurrent `ros2 topic echo` subprocesses could lose the DDS discovery
+        # race and capture nothing (the transient_local /safety/zone, and even the
+        # arm-trajectory presence check).
         rec = _record_safety_topics(
-            _RECORD_SECONDS, zone=True, scale=True, min_distance=True
+            _RECORD_SECONDS, zone=True, scale=True, min_distance=True, arm_traj=True
         )
-        arm_thread.join(timeout=10.0)
         scales = rec["scales"]
         zones = rec["zones"]
         min_dists = rec["min_dists"]
+        arm_traj_seen = rec["arm_traj_count"] > 0
 
         # Sanity: both primary topics must have published something.
         self.assertGreater(
@@ -284,7 +270,7 @@ class TestSSMScenario(unittest.TestCase):
             "waypoints (OperatorPath.generate_random, waypoints 4–6).",
         )
         self.assertTrue(
-            arm_traj_seen[0],
+            arm_traj_seen,
             "AT-4 FAIL: /arm_controller/joint_trajectory published no messages "
             f"in the {_RECORD_SECONDS:.0f} s recording window. "
             "motion_node must publish re-timed trajectory commands when scale > 0; "
