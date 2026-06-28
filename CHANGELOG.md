@@ -19,13 +19,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ### Added
 
-- test(scenario): P4 robustness acceptance harness scaffold
-  (`test/scenario/test_robustness.py`) wired into the CI `scenario` stage — the
-  four cases (AT-6 path generalisation, mid-trajectory resume, fast-crossing
-  reaction, transient-loss recovery) are pending and land one per sprint
-  (see `docs/ROADMAP-P4.md`).
+- test(scenario): **AT-6** — randomised operator paths generalise. With a fixed
+  seed, `human_node` regenerates a fresh random path each cycle, so one long
+  ground-truth run is driven by several distinct paths; the harness asserts the
+  `green→yellow→red` escalation and clean resume recur across them (no
+  path-specific tuning) and that the zone never spuriously enters `lost`.
+- test(scenario): P4 robustness acceptance harness
+  (`test/scenario/test_robustness.py`) wired into the CI `scenario` stage; the
+  remaining cases (mid-trajectory resume, fast-crossing reaction, transient-loss
+  recovery) are pending and land one per sprint (see `docs/ROADMAP-P4.md`).
 - docs(roadmap): `docs/ROADMAP-P4.md` — TDD/agile task breakdown for the P4
   robustness phase (→ v0.4.0).
+
+### Changed
+
+- test(scenario): factor the shared launch_testing helpers (topic collection,
+  zone-stream analysis, controller readiness) out of the AT-1..AT-5 harness into
+  `test/scenario/_ssm_harness.py`, reused by both scenario harnesses (no
+  duplication).
 
 ---
 
