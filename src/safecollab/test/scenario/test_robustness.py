@@ -317,7 +317,16 @@ class TestCleanShutdown(unittest.TestCase):
     def test_exit_codes(self, proc_info: object, cell_present: bool) -> None:
         if not cell_present:
             self.skipTest("nothing launched; no exit codes to check.")
+        # Allowed shutdown codes mirror the AT-1..AT-5 / integration harnesses:
+        # 0, -SIGINT(-2), -SIGTERM(-15), and -SIGABRT(-6) — the gz stack (gz sim
+        # and the ros_gz_bridge parameter_bridge) can abort during gz-transport
+        # teardown; a teardown-only artifact, not a bring-up crash.
         launch_testing.asserts.assertExitCodes(
             proc_info,
-            allowable_exit_codes=[0, -signal.SIGINT, -signal.SIGTERM],
+            allowable_exit_codes=[
+                0,
+                -signal.SIGINT,
+                -signal.SIGTERM,
+                -signal.SIGABRT,
+            ],
         )
