@@ -35,6 +35,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
   recovery) are pending and land one per sprint (see `docs/ROADMAP-P4.md`).
 - docs(roadmap): `docs/ROADMAP-P4.md` — TDD/agile task breakdown for the P4
   robustness phase (→ v0.4.0).
+- docs(robustness): `docs/ROBUSTNESS.md` — the four P4 robustness guarantees
+  (AT-6, AT-4r, AT-3r, AT-5r), the layer each is verified at, and how to
+  reproduce them.
 
 ### Changed
 

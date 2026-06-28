@@ -22,6 +22,7 @@
 # OWNED BY: the P4 robustness sprint (feat/p4-robustness).
 
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -319,8 +320,6 @@ class TestCleanShutdown(unittest.TestCase):
     def test_exit_codes(self, proc_info: object, cell_present: bool) -> None:
         if not cell_present:
             self.skipTest("nothing launched; no exit codes to check.")
-        import signal
-
         launch_testing.asserts.assertExitCodes(
             proc_info,
             allowable_exit_codes=[0, -signal.SIGINT, -signal.SIGTERM],

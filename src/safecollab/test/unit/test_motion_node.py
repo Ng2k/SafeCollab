@@ -359,6 +359,19 @@ def test_resume_monotonic_progress_toward_goal():
     assert positions == [[1.5], [2.0], [3.0]]
 
 
+def test_resume_when_already_at_goal_keeps_goal():
+    """If the robot is halted at the leg goal, resume still yields a valid
+    [current, goal] trajectory — the goal is always retained, never empty."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1"], [0.0, 1.0], [[0.0], [2.0]])
+    logic.set_scale(0.0)
+    logic.set_joint_positions([2.0])  # already at the goal
+
+    logic.set_scale(1.0)
+    _, _, positions = logic.compute_command(resuming=True)
+    assert positions == [[2.0], [2.0]]
+
+
 def test_resume_barely_moved_keeps_ahead_waypoints():
     """If the robot only just left the start, the ahead waypoints are retained."""
     logic = MotionLogic()
