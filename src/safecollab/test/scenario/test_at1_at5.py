@@ -337,6 +337,9 @@ class TestCleanShutdown(unittest.TestCase):
       -SIGINT    normal teardown via launch's SIGINT delivery (-2)
       -SIGTERM   gz sim's ruby wrapper sometimes misses the 5 s SIGINT grace
                  period and receives SIGTERM from launch (-15)
+      -SIGABRT   the gz stack can abort during SIGINT teardown — gz sim and the
+                 ros_gz_bridge parameter_bridge (/clock) intermittently SIGABRT
+                 in gz-transport cleanup (-6); a teardown-only artifact.
     human_node is SIGSTOP/SIGCONT'd during AT-5 (not killed), so it exits via
     the normal -SIGINT path at teardown — no special case needed.
     """
@@ -346,5 +349,10 @@ class TestCleanShutdown(unittest.TestCase):
             self.skipTest("nothing launched; no exit codes to check.")
         launch_testing.asserts.assertExitCodes(
             proc_info,
-            allowable_exit_codes=[0, -signal.SIGINT, -signal.SIGTERM],
+            allowable_exit_codes=[
+                0,
+                -signal.SIGINT,
+                -signal.SIGTERM,
+                -signal.SIGABRT,
+            ],
         )

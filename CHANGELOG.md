@@ -64,10 +64,11 @@ live scenario). See `docs/ROBUSTNESS.md`.
   zone-stream analysis, controller readiness) out of the AT-1..AT-5 harness into
   `test/scenario/_ssm_harness.py`, reused by both scenario harnesses (no
   duplication).
-- ci(deliver): build, save and upload the deploy image tarball **only on version
-  tags**. The `package` job still verifies the image build on every run, so
-  regular pushes/PRs no longer build and store the ~1 GB tarball — that was
-  filling the runner / CI artifact storage.
+- ci(deliver): build, save and publish the deploy image tarball **as the GitHub
+  Release asset, only on version tags** — there is no `actions/upload-artifact`
+  copy (it was redundant with the Release asset and consumed the Actions storage
+  quota, ~1 GB per run). The `package` job still verifies the image build on
+  every run, so regular pushes/PRs build no tarball at all.
 
 ### Fixed
 
@@ -95,6 +96,11 @@ live scenario). See `docs/ROBUSTNESS.md`.
   `/safety/scale` on the same tick was fine), then the arm-trajectory `--once`
   check (failing AT-4). One subscriber with QoS matched to each topic's contract
   is deterministic.
+- test(integration,scenario): tolerate the gz stack's `SIGABRT` (-6) during
+  SIGINT teardown in the post-shutdown exit-code checks (gz sim and the
+  `ros_gz_bridge` `/clock` `parameter_bridge` intermittently abort in
+  gz-transport cleanup), alongside the existing `-SIGTERM` tolerance — a
+  teardown-only artifact, not a bring-up crash.
 
 **Verification:** 264 unit tests passing, total coverage 97.4% (≥ 90 % gate on
 safety/risk); `ruff check` + `ruff format --check` clean; the AT-1..AT-5 and the
