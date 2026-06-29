@@ -42,12 +42,13 @@ live scenario). See `docs/ROBUSTNESS.md`.
 - test(scenario): **AT-5 hardening** — transient detection loss recovery. In the
   same robustness bring-up, `human_node` is SIGSTOP'd so the human TF goes stale:
   the monitor must fail-safe (zone `lost`, scale 0); on SIGCONT the zone must
-  leave `lost` (re-acquire, no permanent latch) and the protective stop must lift
-  (scale rises above the stop floor), with no node faulting (asserted by the
-  post-shutdown exit-code check). The recovery check is position-independent — it
-  does not require a specific scale, since where the operator is when re-acquired
-  depends on freeze-duration × real-time factor. Runs after AT-6 so it cannot
-  perturb it.
+  leave `lost` (re-acquire, no permanent latch), with no node faulting (asserted
+  by the post-shutdown exit-code check). The recovery check is position-independent
+  — zone-left-`lost` is the proof, since where the operator is when re-acquired
+  (and thus the exact scale) depends on freeze-duration × real-time factor; scale
+  is asserted to lift only when a tracked out-of-red zone is actually observed
+  (catching a scale-only latch without a timing dependency). Runs after AT-6 so it
+  cannot perturb it.
 - test(scenario): P4 robustness acceptance harness
   (`test/scenario/test_robustness.py`) wired into the CI `scenario` stage,
   holding the live robustness cases (AT-6, AT-5r); the pure-logic cases (AT-4r,
@@ -96,6 +97,14 @@ live scenario). See `docs/ROBUSTNESS.md`.
   `/safety/scale` on the same tick was fine), then the arm-trajectory `--once`
   check (failing AT-4). One subscriber with QoS matched to each topic's contract
   is deterministic.
+- fix(scenario): make the AT-5r resume check position-independent. The old check
+  asserted scale rose above the stop floor unconditionally after re-acquire, but
+  scale is 0 in both `red` and `lost`, so it required the re-acquired operator to
+  also leave the red band within the window — a freeze-duration × RTF artifact
+  (observed `max 0.000`). Scale is now asserted to lift only when a tracked
+  out-of-red (`yellow`/`green`) zone is actually observed, which still catches a
+  scale-only latch but never flakes on an operator legitimately still in red; the
+  no-latch proof rests on the zone leaving `lost`.
 - test(integration,scenario): tolerate the gz stack's `SIGABRT` (-6) during
   SIGINT teardown in the post-shutdown exit-code checks (gz sim and the
   `ros_gz_bridge` `/clock` `parameter_bridge` intermittently abort in

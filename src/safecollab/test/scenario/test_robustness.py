@@ -208,8 +208,12 @@ class TestRobustness(unittest.TestCase):
         SIGSTOP freezes ``human_node`` without killing it: the ground-truth TF
         stops, so after ``loss_timeout`` the monitor must fail-safe (zone ``lost``,
         scale 0) — a transient detection loss. SIGCONT restores the TF; the loop
-        must re-acquire and resume (scale recovers above 0.5) with no node
-        faulting (the post-shutdown ``test_exit_codes`` asserts the clean exit).
+        must re-acquire — the zone LEAVES ``lost`` (the fail-safe releases, it does
+        not latch) — with no node faulting (the post-shutdown ``test_exit_codes``
+        asserts the clean exit). The exact recovered scale is not asserted: it
+        depends on where the re-acquired operator is (a tracked operator still in
+        red is scale 0 by design); the position-independent proof of recovery is
+        the zone leaving ``lost``.
         ``human_node`` is always SIGCONT'd before this method returns — even on an
         assertion failure — so teardown stays clean.
         """
@@ -289,20 +293,35 @@ class TestRobustness(unittest.TestCase):
             f"({sorted(set(zone_resume))}); the fail-safe must release on "
             "re-acquire, not latch.",
         )
-        # Resume: the protective stop is lifted — the arm is commanded to move
-        # again (scale rises above the stop floor) as the operator, now tracked,
-        # moves out of the red band.
+        # Resume: the scale loop is LIVE again — driven by the real distance, not
+        # pinned by the fail-safe. We do NOT require the operator to have left the
+        # red band within the window: where the (now re-acquired) operator resumes
+        # depends on the freeze duration × real-time factor, and an operator still
+        # in red yields scale 0.0 by design (red == protective stop, FR-9), which
+        # is correct SSM behaviour — not a latch. The zone-left-'lost' assertion
+        # above is the position-independent proof that the fail-safe released.
+        #
+        # The remaining failure mode to exclude is a scale-only latch: the zone
+        # recovers but scale stays pinned at 0 forever. That is detectable WITHOUT
+        # timing dependence, because scale is 0 only in red/lost: whenever a
+        # tracked, out-of-red zone (yellow/green) is observed, a live loop MUST
+        # report scale > 0. So we require scale > floor only when such a zone
+        # actually appears in the window; if the operator stayed in red throughout,
+        # scale 0 is correct and the case rests on zone-left-'lost'.
         self.assertGreater(
             len(scale_resume),
             0,
             "AT-5 FAIL: /safety/scale silent after the operator was re-acquired.",
         )
-        self.assertTrue(
-            any(s > 0.05 for s in scale_resume),
-            "AT-5 FAIL: scale never rose above the protective-stop floor after "
-            f"re-acquire (max {max(scale_resume):.3f}); the loop must lift the "
-            "stop once the human TF returns (no permanent latch in 'lost').",
-        )
+        tracked_out_of_red = any(z not in ("lost", "red") for z in zone_resume)
+        if tracked_out_of_red:
+            self.assertTrue(
+                any(s > 0.05 for s in scale_resume),
+                "AT-5 FAIL: a tracked out-of-red zone (yellow/green) was observed "
+                f"after re-acquire ({sorted(set(zone_resume))}) but scale stayed at "
+                f"the stop floor (max {max(scale_resume):.3f}) — the scale loop is "
+                "latched at 0 even though the live distance left the red band.",
+            )
 
 
 # ---------------------------------------------------------------------------
