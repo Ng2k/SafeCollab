@@ -18,11 +18,17 @@
 #   * THIS terminal  — the console HUD, one colour-coded line refreshed in place:
 #                        SSM | RED    | speed   0% | min-dist 0.38 m
 #
+# By default gz runs HEADLESS (offscreen) and RViz is the visible 3D window —
+# reliable under Wayland. Add --gz-gui for the raw Gazebo window only if your GL
+# passthrough is known good (it can hang the sim otherwise; RViz shows everything
+# anyway).
+#
 # USAGE:
 #   scripts/record-demo.sh                 # build (if needed) + bring it all up
 #   scripts/record-demo.sh --no-build      # reuse an existing safecollab:dev image
 #   scripts/record-demo.sh --source ground_truth   # if perception is GPU-flaky
 #   scripts/record-demo.sh --seed 7        # a different deterministic operator path
+#   scripts/record-demo.sh --gz-gui        # also open the raw Gazebo window
 #   scripts/record-demo.sh --auto-failsafe # auto-trigger the loss->recover cue
 #
 #   # In a SECOND terminal, cue the fail-safe on demand while recording:
@@ -45,6 +51,13 @@ SOURCE="perceived"            # perceived (headline) | ground_truth (fallback)
 SEED=42                       # deterministic operator path (human_node path_seed)
 DO_BUILD=1
 RVIZ="true"
+# gz runs headless (server-only, offscreen rendering) by default — reliable, and
+# RViz already shows the robot, camera feed, and zone marker/label. The gz GUI
+# (headless:=false) launches server+GUI as one process and, if the GUI cannot
+# initialise (common under Wayland/GL), it takes the server down too and nothing
+# spawns. Opt into the raw Gazebo window with --gz-gui only if your GL passthrough
+# is known good.
+HEADLESS="true"
 STARTUP_TIMEOUT=150           # max seconds to wait for the cell to publish /safety
 FAILSAFE_HOLD=6               # seconds to hold the detection loss in `failsafe`
 AUTO_FAILSAFE=0
@@ -77,11 +90,12 @@ while [ $# -gt 0 ]; do
         --source)        SOURCE="${2:?--source needs perceived|ground_truth}"; shift ;;
         --seed)          SEED="${2:?--seed needs an integer}"; shift ;;
         --no-rviz)       RVIZ="false" ;;
+        --gz-gui)        HEADLESS="false" ;;
         --auto-failsafe) AUTO_FAILSAFE=1 ;;
         --hold)          FAILSAFE_HOLD="${2:?--hold needs seconds}"; shift ;;
         --image)         IMAGE="${2:?--image needs a tag}"; shift ;;
         --container)     CONTAINER="${2:?--container needs a name}"; shift ;;
-        -h|--help)       sed -n '2,48p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        -h|--help)       sed -n '2,58p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *)               die "unknown argument: $1 (try --help)" ;;
     esac
     shift
@@ -183,11 +197,14 @@ if [ "$CMD" = "up" ]; then
     fi
     info "granting local X access to docker (revoked on exit) ..."
     xhost +local:docker >/dev/null 2>&1 || warn "xhost grant failed; the GUI may not appear."
+    [ "$HEADLESS" = "false" ] && warn "--gz-gui: launching the raw Gazebo window; if it \
+hangs at 'Requesting list of world names', your GL passthrough can't start the gz GUI — \
+drop --gz-gui (RViz still shows everything)."
 
-    # ---- 3. launch the cell (detached: GUI + RViz windows appear) -----------
+    # ---- 3. launch the cell (detached: RViz [+ gz GUI] windows appear) -------
     # No --rm: keep the container so 'docker logs' survives a start-up crash;
     # teardown removes it (docker rm -f) on exit.
-    info "starting the cell: source=${SOURCE} seed=${SEED} rviz=${RVIZ} (GUI) ..."
+    info "starting the cell: source=${SOURCE} seed=${SEED} rviz=${RVIZ} gz_gui=$([ "$HEADLESS" = false ] && echo on || echo off) ..."
     docker run -d --init --name "${CONTAINER}" \
         -e DISPLAY="${DISPLAY}" \
         -v /tmp/.X11-unix:/tmp/.X11-unix \
@@ -195,7 +212,7 @@ if [ "$CMD" = "up" ]; then
         "${DRI_ARGS[@]}" \
         "${RUN_IMAGE}" \
         ros2 launch safecollab cell.launch.py \
-            headless:=false rviz:="${RVIZ}" \
+            headless:="${HEADLESS}" rviz:="${RVIZ}" \
             safety_source:="${SOURCE}" path_seed:="${SEED}" \
         >/dev/null || die "docker run failed."
 
@@ -220,8 +237,9 @@ cat <<EOF
 
   ${C_B}READY TO RECORD${C_0}
   -----------------------------------------------------------------------------
-  Windows:  Gazebo (sim)  +  RViz (zone sphere & label)  +  this terminal (HUD).
-  Record all three. A good ~30 s take captures, in order:
+  Windows:  RViz (robot + camera feed + zone sphere & label)  +  this terminal
+  (the HUD).  [Gazebo's own window only with --gz-gui.]
+  Record the RViz window and this terminal. A good ~30 s take captures, in order:
     1. the operator approaching:     zone GREEN -> YELLOW -> RED, HUD speed -> 0%
     2. the operator retreating:      arm resumes, zone back to GREEN
     3. a transient detection loss:   run the cue below in ANOTHER terminal:

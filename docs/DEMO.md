@@ -5,7 +5,7 @@ green → yellow → red **protective stop → resume** cycle, **plus** a transi
 detection-loss **fail-safe** (`lost` → re-acquire), driven by the *perceived*
 operator (not ground truth — DoD #5).
 
-It runs in the `safecollab:dev` Docker image with X11 passthrough, the same way
+It runs in the `safecollab:demo` Docker image with X11 passthrough, the same way
 as [`VALIDATE.md`](VALIDATE.md) §5, so it works on Arch / Omarchy under Hyprland
 (XWayland). One script brings up everything.
 
@@ -13,16 +13,16 @@ as [`VALIDATE.md`](VALIDATE.md) §5, so it works on Arch / Omarchy under Hyprlan
 
 ## 1. What you will see
 
-It is a live experiment, not a log dump — three things on screen:
+It is a live experiment, not a log dump — two things on screen:
 
 ```
-┌──────────────────────────┐   ┌────────────────────────────────────┐
-│  Gazebo (the simulation) │   │  RViz                              │
-│  • robot arm kitting     │   │  • robot model + camera image      │
-│  • yellow operator box   │   │  • safety-zone SPHERE at operator  │
-│    moving along its path │   │  • floating GREEN/YELLOW/RED/LOST   │
-│                          │   │    text label (same colour)        │
-└──────────────────────────┘   └────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│  RViz                                       │
+│  • robot model                              │
+│  • camera image (the overhead cell view)    │
+│  • safety-zone SPHERE at the operator       │
+│  • floating GREEN/YELLOW/RED/LOST label     │
+└────────────────────────────────────────────┘
 ┌────────────────────────────────────────────────────────────────────┐
 │  This terminal — console HUD, one colour-coded line, in place:       │
 │     SSM | RED    | speed   0% | min-dist 0.38 m                      │
@@ -33,6 +33,12 @@ As the operator approaches the tray, the sphere/label and HUD go
 `GREEN → YELLOW → RED`, the arm slows then stops (`speed 0%`); as the operator
 retreats it resumes. Freezing perception makes it fail-safe to grey `LOST`, then
 re-acquire.
+
+> **Gazebo runs headless by default** (offscreen rendering) — RViz shows the
+> robot, the camera feed, and the zones, so the raw Gazebo window is redundant
+> and is left off because its GUI is unreliable under Wayland (it can hang the
+> simulator). Add `--gz-gui` to also open the Gazebo window *only* if your GL
+> passthrough is known good.
 
 ---
 
@@ -59,8 +65,9 @@ re-acquire.
 scripts/record-demo.sh
 ```
 
-Wait for `cell is up`. The Gazebo and RViz windows open; this terminal becomes
-the HUD. Start your screen recorder now (see §5).
+Wait for `cell is up`. The **RViz** window opens; this terminal becomes the HUD.
+(Gazebo runs headless — add `--gz-gui` for its window only if your GL is solid.)
+Start your screen recorder now (see §5).
 
 **Cue the fail-safe** when you want it on camera — in a *second* terminal:
 
@@ -86,7 +93,8 @@ scripts/record-demo.sh down
 | `--no-build` | Reuse the existing `safecollab:dev` (must already contain P5). |
 | `--source ground_truth` | Drive the loop from the ground-truth TF if perception is GPU-flaky. The fail-safe cue then freezes `human_node` instead. |
 | `--seed N` | A different deterministic operator path (default `42`). |
-| `--no-rviz` | Gazebo + HUD only (lighter, no RViz window). |
+| `--no-rviz` | HUD only (no RViz window; gz stays headless — minimal). |
+| `--gz-gui` | Also open the raw Gazebo window (needs known-good GL passthrough). |
 | `--auto-failsafe` | Fire the loss→recover cue automatically ~35 s in (hands-free). |
 
 ---
@@ -151,7 +159,9 @@ docker run --rm --init --name safecollab-demo \
     -e DISPLAY="${DISPLAY:-:0}" -v /tmp/.X11-unix:/tmp/.X11-unix \
     --network host --device /dev/dri \
     safecollab:demo \
-    ros2 launch safecollab cell.launch.py headless:=false rviz:=true safety_source:=perceived
+    ros2 launch safecollab cell.launch.py headless:=true rviz:=true safety_source:=perceived
+    # (headless:=true keeps gz offscreen; RViz is the window. Use headless:=false
+    #  only if you want the gz GUI and your GL passthrough is known good.)
 
 # Terminal 2 — the HUD (its own pane keeps the in-place line clean):
 docker exec -it safecollab-demo /entrypoint.sh ros2 run safecollab hud_node
@@ -169,7 +179,8 @@ xhost -local:docker   # when done
 
 | Symptom | Likely cause / fix |
 |---------|--------------------|
-| Gazebo/RViz window is black or GL errors | X/DRI passthrough isn't reaching the GPU. Confirm `/dev/dri` exists; try `--no-rviz` to lighten the load; software GL is slow — give it more start-up time. |
+| Stuck at `Requesting list of world names` / nothing spawns / `cell is up` never prints | The gz GUI couldn't start and took the server down — you used `--gz-gui`. Drop it; the default (gz headless + RViz) is reliable. |
+| RViz window is black or GL errors | X/DRI passthrough isn't reaching the GPU. Confirm `/dev/dri` exists; `--no-rviz` falls back to HUD-only; software GL is slow — give it more start-up time. |
 | HUD shows `LOST` the whole time | Perception isn't detecting the operator (out of FOV, or GPU render too slow). Use `--source ground_truth` to demo the SSM behaviour without perception. |
 | `record-demo.sh failsafe` says "not running" | The `up` container isn't started, or it exited — check `docker logs safecollab-demo`. |
 | RViz window never opens / `rviz2: command not found` | The demo image lacks RViz. Rebuild it (drop `--no-build`) so `safecollab:demo` is layered from `scripts/demo.Dockerfile`, or run `--no-rviz`. |
