@@ -17,7 +17,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
-- _(work in progress toward the next tag)_
+P5 — polish & demo (toward `v0.5.0`); see `docs/ROADMAP-P5.md`.
+
+### Added
+
+- feat(viz): **RViz zone visualisation** (P5 sprint 1). `safety_monitor` now also
+  publishes a floating `TEXT_VIEW_FACING` zone label (`/viz/safety_marker` id 1,
+  e.g. `RED` / `LOST`) above the existing zone sphere (id 0), sharing the single
+  `_ZONE_RGBA` source so the two colours can never drift. `cell.launch.py` gains
+  an `rviz:=true` argument (default `false`, so CI/headless and the scenario
+  harness are unchanged) that starts `rviz2 -d config/view.rviz`; `view.rviz`
+  gains a Marker display on `/viz/safety_marker`. Label gap above the sphere and
+  glyph height are configurable (`marker_label_offset`, `marker_label_height` in
+  `config/safety.yaml`; ground rule 5).
+- test(viz): unit-cover the label geometry (`_marker_params` label text/position)
+  and assert the marker contract live (AT-V in the AT-1..AT-5 harness): the sphere
+  is zone-coloured and the text label names the zone in the matching colour, on
+  `/viz/safety_marker` — folded into the existing bring-up (no extra launch).
 
 ---
 

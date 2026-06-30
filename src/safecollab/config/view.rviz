@@ -59,6 +59,14 @@ Visualization Manager:
         Depth: 5
         Durability Policy: Volatile
         Reliability Policy: Best Effort
+    - Class: rviz_default_plugins/Marker
+      Name: SafetyZone
+      Enabled: true
+      Topic:
+        Value: /viz/safety_marker
+        Depth: 10
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
   Tools:
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/FocusCamera

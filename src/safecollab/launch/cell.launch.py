@@ -94,6 +94,18 @@ def generate_launch_description():
     )
     path_seed = LaunchConfiguration("path_seed")
 
+    rviz_arg = DeclareLaunchArgument(
+        "rviz",
+        default_value="false",
+        description=(
+            "Launch RViz with config/view.rviz to visualise the cell: robot model, "
+            "camera image, and the /viz/safety_marker zone sphere + text label "
+            "(P5). Default false so CI/headless and the scenario harness are "
+            "unaffected. Example: ros2 launch safecollab cell.launch.py rviz:=true"
+        ),
+    )
+    rviz = LaunchConfiguration("rviz")
+
     # ------------------------------------------------------------------
     # Gazebo simulation — §6 item 1 prerequisite
     # Two variants, exactly one runs per invocation (IfCondition / UnlessCondition).
@@ -339,11 +351,29 @@ def generate_launch_description():
         parameters=[{"use_sim_time": True, "safety_source": safety_source}],
     )
 
+    # ------------------------------------------------------------------
+    # P5: RViz — only when rviz:=true (default false keeps CI/headless clean).
+    # Loads config/view.rviz (RobotModel + Camera + safety-zone Marker display)
+    # so the green/yellow/red/lost state is legible at a glance.
+    # ------------------------------------------------------------------
+
+    rviz_config = PathJoinSubstitution([pkg, "config", "view.rviz"])
+
+    rviz_node = Node(
+        package="rviz2",
+        executable="rviz2",
+        arguments=["-d", rviz_config],
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+        condition=IfCondition(rviz),
+    )
+
     return LaunchDescription(
         [
             headless_arg,
             safety_source_arg,
             path_seed_arg,
+            rviz_arg,
             # gz sim: exactly one of these two runs depending on headless argument
             gz_server,  # headless=true  -> server-only (CI / no display)
             gz_full,  # headless=false -> server + GUI (interactive)
@@ -372,5 +402,7 @@ def generate_launch_description():
             # --- safety loop: perception -> safety_monitor -> motion scale ---
             perception_node,  # Stream C
             safety_monitor,  # Stream F
+            # --- P5 visualisation (only when rviz:=true) ---
+            rviz_node,
         ]
     )

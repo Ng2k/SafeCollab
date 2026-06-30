@@ -38,7 +38,9 @@ safety:
     - tcp
     - link_6
     - link_3
-  marker_radius: 0.15  # radius (m) of the RViz safety-zone sphere at the human position
+  marker_radius: 0.15        # radius (m) of the RViz safety-zone sphere at the human position
+  marker_label_offset: 0.25  # gap (m) between the sphere top and the floating zone text label
+  marker_label_height: 0.20  # RViz TEXT_VIEW_FACING glyph height (m) for the zone label
   # safety_source (AGENTS.md §11 cut-scope fallback #4)
   #   "perceived"    (default) — safety loop reads world → human TF from perception_node.
   #                              This is the headline demo path (DoD #5: perceived human

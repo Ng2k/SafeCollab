@@ -81,6 +81,8 @@ def load_safety_config(path) -> SimpleNamespace:
         ``loss_timeout`` — stale-TF grace period in seconds.
         ``robot_frames`` — list of TF frame names for the min-distance sweep.
         ``marker_radius`` — RViz sphere radius in metres.
+        ``marker_label_offset`` — gap (m) above the sphere top for the zone label.
+        ``marker_label_height`` — RViz text glyph height (m) for the zone label.
     """
     with open(Path(path), "r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle)
@@ -90,6 +92,8 @@ def load_safety_config(path) -> SimpleNamespace:
         loss_timeout=float(safety["loss_timeout"]),
         robot_frames=list(safety.get("robot_frames", ["tcp", "wrist", "elbow"])),
         marker_radius=float(safety.get("marker_radius", 0.15)),
+        marker_label_offset=float(safety.get("marker_label_offset", 0.25)),
+        marker_label_height=float(safety.get("marker_label_height", 0.20)),
     )
 
 
@@ -146,6 +150,10 @@ class SafetyMonitorLogic:
         self._s_min = safety_cfg.s_min
         self._loss_timeout = safety_cfg.loss_timeout
         self._marker_radius = safety_cfg.marker_radius
+        # Zone text-label geometry (defaults mirror load_safety_config so an
+        # in-memory cfg without these fields still constructs cleanly).
+        self._marker_label_offset = getattr(safety_cfg, "marker_label_offset", 0.25)
+        self._marker_label_height = getattr(safety_cfg, "marker_label_height", 0.20)
 
     # ------------------------------------------------------------------
     # Public read-only properties (consumed by the ROS wrapper)
@@ -165,6 +173,16 @@ class SafetyMonitorLogic:
     def marker_radius(self) -> float:
         """Radius of the RViz safety-zone sphere in metres."""
         return self._marker_radius
+
+    @property
+    def marker_label_offset(self) -> float:
+        """Gap (m) between the sphere top and the floating zone text label."""
+        return self._marker_label_offset
+
+    @property
+    def marker_label_height(self) -> float:
+        """RViz TEXT_VIEW_FACING glyph height (m) for the zone label."""
+        return self._marker_label_height
 
     # ------------------------------------------------------------------
     # Static helpers
@@ -199,6 +217,7 @@ class SafetyMonitorLogic:
         zone: str,
         human_xyz_or_none: Optional[Tuple[float, float, float]],
         radius: float,
+        label_offset: float = 0.0,
     ) -> dict:
         """Build RViz marker parameters for the safety zone.
 
@@ -211,6 +230,10 @@ class SafetyMonitorLogic:
                                         or world origin when ``None``).
             ``radius``                 — sphere radius in metres.
             ``zone``                   — zone string (for callers that need it).
+            ``label``                  — zone text (upper case) for the floating
+                                         RViz label that shares the sphere colour.
+            ``label_z``                — world-z of the label: the sphere top
+                                         (``z + radius``) plus ``label_offset``.
         """
         r, g, b, a = _ZONE_RGBA.get(zone, (0.5, 0.5, 0.5, 0.4))
         if human_xyz_or_none is not None:
@@ -227,6 +250,9 @@ class SafetyMonitorLogic:
             "z": z,
             "radius": radius,
             "zone": zone,
+            # The label reuses the SAME (r, g, b) — one zone->colour source.
+            "label": zone.upper(),
+            "label_z": z + radius + label_offset,
         }
 
     # ------------------------------------------------------------------
@@ -283,7 +309,9 @@ class SafetyMonitorLogic:
         zone, scale = classify(d, d_red=d_red, d_yellow=d_yellow, s_min=self._s_min)
 
         # RViz marker parameters ------------------------------------------
-        marker = self._marker_params(zone, human_xyz_or_none, self._marker_radius)
+        marker = self._marker_params(
+            zone, human_xyz_or_none, self._marker_radius, self._marker_label_offset
+        )
 
         return zone, scale, d, marker
 
@@ -540,6 +568,29 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
         marker.color.b = marker_p["b"]
         marker.color.a = marker_p["a"]
         self._marker_pub.publish(marker)
+
+        # /viz/safety_marker — floating zone text label (id=1, distinct from the
+        # sphere id=0 so RViz shows both). Shares the sphere colour; text is fully
+        # opaque (a=1.0) so the word stays legible even in the half-transparent
+        # 'lost' state. Height comes from config (ground rule 5).
+        label = Marker()
+        label.header.stamp = marker.header.stamp
+        label.header.frame_id = self._WORLD_FRAME
+        label.ns = "safety_monitor"
+        label.id = 1
+        label.type = Marker.TEXT_VIEW_FACING
+        label.action = Marker.ADD
+        label.text = marker_p["label"]
+        label.pose.position.x = marker_p["x"]
+        label.pose.position.y = marker_p["y"]
+        label.pose.position.z = marker_p["label_z"]
+        label.pose.orientation.w = 1.0
+        label.scale.z = self._logic.marker_label_height
+        label.color.r = marker_p["r"]
+        label.color.g = marker_p["g"]
+        label.color.b = marker_p["b"]
+        label.color.a = 1.0
+        self._marker_pub.publish(label)
 
 
 # ---------------------------------------------------------------------------
