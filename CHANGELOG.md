@@ -43,6 +43,16 @@ P5 — polish & demo (toward `v0.5.0`); see `docs/ROADMAP-P5.md`.
   `config/hud.yaml` (ground rule 5). In `lost` the distance is shown as `--`
   (FR-9: a stale last position is never displayed). The pure formatter
   (`format_status`) is unit-tested; `HudNode` is a thin I/O shell over it.
+- feat(demo): **one-command demo** (P5 sprint 3). `scripts/record-demo.sh` brings
+  up the full cell with the GUI (Gazebo + RViz zone sphere/label) and the console
+  HUD, driven by the *perceived* operator, with X11 passthrough; a `failsafe`
+  subcommand cues the transient detection-loss (`lost` → re-acquire) on demand (or
+  `--auto-failsafe` fires it hands-free), and `Ctrl-C` / `down` tears everything
+  down cleanly. RViz is layered onto a demo-only image (`scripts/demo.Dockerfile`:
+  `safecollab:dev` + `ros-jazzy-rviz2`) so the lean image CI builds and the
+  deliver job ships stays free of Qt/OGRE. `docs/DEMO.md` is the recording
+  walkthrough (windows, cues, GIF capture, the 5-second legibility check); the GIF
+  lands at `docs/media/`.
 
 ---
 
