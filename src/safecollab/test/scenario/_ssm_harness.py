@@ -46,13 +46,16 @@ def record_safety_topics(
     scale: bool = False,
     min_distance: bool = False,
     arm_traj: bool = False,
+    marker: bool = False,
 ) -> dict:
     """Record cell topics for *duration_s* via one in-process rclpy node.
 
     Returns ``{"zones": [...], "scales": [...], "min_dists": [...],
-    "arm_traj_count": int}``; only the requested entries are populated
-    (``arm_traj_count`` is the number of ``/arm_controller/joint_trajectory``
-    messages seen).
+    "arm_traj_count": int, "markers": [...]}``; only the requested entries are
+    populated (``arm_traj_count`` is the number of
+    ``/arm_controller/joint_trajectory`` messages seen). ``markers`` holds the
+    DISTINCT ``(id, type, (r, g, b), text)`` signatures seen on
+    ``/viz/safety_marker`` (deduplicated to bound memory over the window).
 
     Why rclpy instead of ``ros2 topic echo``: the CLI echo of the reliable +
     TRANSIENT_LOCAL ``/safety/zone`` can lose the DDS discovery race under load
@@ -76,7 +79,13 @@ def record_safety_topics(
     if not rclpy.ok():
         rclpy.init()
     node = Node("ssm_topic_recorder")
-    out: dict = {"zones": [], "scales": [], "min_dists": [], "arm_traj_count": 0}
+    out: dict = {
+        "zones": [],
+        "scales": [],
+        "min_dists": [],
+        "arm_traj_count": 0,
+        "markers": [],
+    }
 
     if scale:
         # /safety/scale — reliable (§3 contract).
@@ -116,6 +125,33 @@ def record_safety_topics(
 
         node.create_subscription(
             JointTrajectory, "/arm_controller/joint_trajectory", _bump, 10
+        )
+    if marker:
+        # /viz/safety_marker — safety_monitor publishes best-effort, depth 10.
+        # Record DISTINCT (id, type, rgb, text) signatures: the sphere (id 0)
+        # and the zone text label (id 1) per zone, so the list stays small.
+        from visualization_msgs.msg import Marker
+
+        _seen: set = set()
+
+        def _on_marker(m):
+            sig = (
+                m.id,
+                m.type,
+                (round(m.color.r, 3), round(m.color.g, 3), round(m.color.b, 3)),
+                m.text,
+            )
+            if sig not in _seen:
+                _seen.add(sig)
+                out["markers"].append(sig)
+
+        be_marker_qos = QoSProfile(
+            depth=10,
+            history=HistoryPolicy.KEEP_LAST,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
+        node.create_subscription(
+            Marker, "/viz/safety_marker", _on_marker, be_marker_qos
         )
 
     deadline = time.monotonic() + duration_s

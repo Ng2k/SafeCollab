@@ -70,7 +70,12 @@ def logic(risk_cfg, safety_cfg):
 def minimal_safety_cfg():
     """A minimal in-memory safety config for tests that don't need the file."""
     return SimpleNamespace(
-        s_min=0.10, loss_timeout=0.5, robot_frames=["tcp"], marker_radius=0.15
+        s_min=0.10,
+        loss_timeout=0.5,
+        robot_frames=["tcp"],
+        marker_radius=0.15,
+        marker_label_offset=0.25,
+        marker_label_height=0.2,
     )
 
 
@@ -105,6 +110,14 @@ class TestLoadSafetyConfig:
     def test_marker_radius_is_positive(self, safety_cfg):
         assert safety_cfg.marker_radius > 0.0
 
+    def test_marker_label_offset_is_positive(self, safety_cfg):
+        # Gap (m) between the sphere top and the floating zone text label.
+        assert safety_cfg.marker_label_offset > 0.0
+
+    def test_marker_label_height_is_positive(self, safety_cfg):
+        # RViz TEXT_VIEW_FACING glyph height (m).
+        assert safety_cfg.marker_label_height > 0.0
+
     def test_s_min_value_matches_yaml(self, safety_cfg):
         # safety.yaml sets s_min: 0.10
         assert safety_cfg.s_min == pytest.approx(0.10)
@@ -133,6 +146,16 @@ class TestSafetyMonitorLogicInit:
 
     def test_marker_radius_from_minimal_cfg(self, minimal_logic):
         assert minimal_logic.marker_radius == pytest.approx(0.15)
+
+    def test_marker_label_offset_property(self, logic, safety_cfg):
+        assert logic.marker_label_offset == pytest.approx(
+            safety_cfg.marker_label_offset
+        )
+
+    def test_marker_label_height_property(self, logic, safety_cfg):
+        assert logic.marker_label_height == pytest.approx(
+            safety_cfg.marker_label_height
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +276,40 @@ class TestMarkerParams:
         assert p["r"] == pytest.approx(0.5)
         assert p["g"] == pytest.approx(0.5)
         assert p["b"] == pytest.approx(0.5)
+
+    # -- Zone text label (P5 sprint 1) --------------------------------------
+
+    def test_label_text_is_zone_uppercase(self):
+        # The floating label spells the zone in upper case for legibility
+        # (RED / LOST read faster than red / lost in a 5-second glance).
+        for zone in ("green", "yellow", "red", "lost"):
+            p = SafetyMonitorLogic._marker_params(zone, (0.0, 0.0, 0.0), 0.15, 0.25)
+            assert p["label"] == zone.upper()
+
+    def test_label_floats_above_sphere_top(self):
+        # Sphere centre at z=0.8, radius 0.15 -> top at 0.95; the label sits a
+        # configurable gap (0.25) above the top: 0.95 + 0.25 = 1.20.
+        p = SafetyMonitorLogic._marker_params("red", (1.5, -0.3, 0.8), 0.15, 0.25)
+        assert p["x"] == pytest.approx(1.5)
+        assert p["y"] == pytest.approx(-0.3)
+        assert p["label_z"] == pytest.approx(0.8 + 0.15 + 0.25)
+
+    def test_label_offset_defaults_to_zero(self):
+        # Backwards-compatible: the 3-arg call still works (label at sphere top).
+        p = SafetyMonitorLogic._marker_params("green", (0.0, 0.0, 0.5), 0.15)
+        assert p["label_z"] == pytest.approx(0.5 + 0.15)
+
+    def test_label_present_for_all_zones(self):
+        for zone in ("green", "yellow", "red", "lost"):
+            p = SafetyMonitorLogic._marker_params(zone, None, 0.15, 0.25)
+            assert "label" in p
+            assert "label_z" in p
+
+    def test_label_shares_zone_colour(self):
+        # The label reuses the single zone->RGBA source, so its colour matches
+        # the sphere (no second, drifting colour table).
+        p = SafetyMonitorLogic._marker_params("yellow", (0.0, 0.0, 0.0), 0.15, 0.25)
+        assert (p["r"], p["g"], p["b"]) == pytest.approx((1.0, 1.0, 0.0))
 
 
 # ---------------------------------------------------------------------------

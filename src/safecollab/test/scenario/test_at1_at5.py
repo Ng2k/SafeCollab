@@ -154,7 +154,12 @@ class TestSSMScenario(unittest.TestCase):
         # race and capture nothing (the transient_local /safety/zone, and even the
         # arm-trajectory presence check).
         rec = _record_safety_topics(
-            _RECORD_SECONDS, zone=True, scale=True, min_distance=True, arm_traj=True
+            _RECORD_SECONDS,
+            zone=True,
+            scale=True,
+            min_distance=True,
+            arm_traj=True,
+            marker=True,
         )
         scales = rec["scales"]
         zones = rec["zones"]
@@ -277,6 +282,65 @@ class TestSSMScenario(unittest.TestCase):
             "check that task_node is publishing /motion/nominal_trajectory and "
             "motion_node is running.",
         )
+
+        # ------------------------------------------------------------------
+        # AT-V (P5 sprint 1): the RViz safety marker is published and
+        #                     zone-coloured, and the floating text label names
+        #                     the zone in the SAME colour as the sphere.
+        # ------------------------------------------------------------------
+        # The marker pipeline is pure-Python unit-tested (_marker_params); this
+        # asserts it LIVES end to end on /viz/safety_marker (the ROS wrapper is
+        # otherwise pragma:no-cover). Colours are checked against the single
+        # source of truth (_ZONE_RGBA), so a drifting second table would fail.
+        from safecollab.safety_monitor import _ZONE_RGBA  # noqa: E402
+        from visualization_msgs.msg import Marker  # noqa: E402
+
+        markers = rec["markers"]
+        self.assertGreater(
+            len(markers),
+            0,
+            "AT-V FAIL: /viz/safety_marker published nothing during the window; "
+            "safety_monitor must publish the zone sphere + label every tick.",
+        )
+        _valid_rgb = {
+            tuple(round(c, 3) for c in rgba[:3]) for rgba in _ZONE_RGBA.values()
+        }
+        spheres = [m for m in markers if m[0] == 0]
+        labels = [m for m in markers if m[0] == 1]
+
+        self.assertGreater(
+            len(spheres), 0, "AT-V FAIL: no zone sphere marker (id 0) observed."
+        )
+        for _id, _type, rgb, _text in spheres:
+            self.assertEqual(
+                _type, Marker.SPHERE, "AT-V FAIL: marker id 0 must be a SPHERE."
+            )
+            self.assertIn(
+                rgb,
+                _valid_rgb,
+                f"AT-V FAIL: sphere colour {rgb} is not a zone colour {_valid_rgb}.",
+            )
+
+        self.assertGreater(
+            len(labels), 0, "AT-V FAIL: no floating zone text label (id 1) observed."
+        )
+        for _id, _type, rgb, text in labels:
+            self.assertEqual(
+                _type,
+                Marker.TEXT_VIEW_FACING,
+                "AT-V FAIL: marker id 1 must be a TEXT_VIEW_FACING label.",
+            )
+            self.assertIn(
+                text.lower(),
+                _ZONE_RGBA,
+                f"AT-V FAIL: label text {text!r} is not a known zone name.",
+            )
+            self.assertEqual(
+                rgb,
+                tuple(round(c, 3) for c in _ZONE_RGBA[text.lower()][:3]),
+                f"AT-V FAIL: label {text!r} colour {rgb} does not match its zone "
+                "colour (the sphere and label must share one zone→colour source).",
+            )
 
         # ------------------------------------------------------------------
         # AT-5: fail-safe on TF loss — SIGSTOP human_node → stale human_gt TF
