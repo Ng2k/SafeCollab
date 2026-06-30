@@ -34,6 +34,15 @@ P5 — polish & demo (toward `v0.5.0`); see `docs/ROADMAP-P5.md`.
   and assert the marker contract live (AT-V in the AT-1..AT-5 harness): the sphere
   is zone-coloured and the text label names the zone in the matching colour, on
   `/viz/safety_marker` — folded into the existing bring-up (no extra launch).
+- feat(hud): **console safety HUD** (P5 sprint 2). A view-only `hud_node`
+  subscribes `/safety/{zone,scale,min_distance}` and redraws one aligned,
+  colour-coded terminal line in place, e.g. `SSM | RED    | speed   0% | min-dist
+  0.38 m` — the 5-second legibility readout. `cell.launch.py` gains `hud:=true`
+  (default `false`, so CI/headless and the scenario harness are unchanged);
+  refresh rate, colour on/off, and the per-zone ANSI codes live in
+  `config/hud.yaml` (ground rule 5). In `lost` the distance is shown as `--`
+  (FR-9: a stale last position is never displayed). The pure formatter
+  (`format_status`) is unit-tested; `HudNode` is a thin I/O shell over it.
 
 ---
 

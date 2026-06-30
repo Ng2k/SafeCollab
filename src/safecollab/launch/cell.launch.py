@@ -106,6 +106,18 @@ def generate_launch_description():
     )
     rviz = LaunchConfiguration("rviz")
 
+    hud_arg = DeclareLaunchArgument(
+        "hud",
+        default_value="false",
+        description=(
+            "Launch the console safety HUD (hud_node): a compact, colour-coded "
+            "terminal readout of zone / speed scale / min-distance (P5). Default "
+            "false so CI/headless and the scenario harness are unaffected. "
+            "Example: ros2 launch safecollab cell.launch.py hud:=true"
+        ),
+    )
+    hud = LaunchConfiguration("hud")
+
     # ------------------------------------------------------------------
     # Gazebo simulation — §6 item 1 prerequisite
     # Two variants, exactly one runs per invocation (IfCondition / UnlessCondition).
@@ -368,12 +380,27 @@ def generate_launch_description():
         condition=IfCondition(rviz),
     )
 
+    # ------------------------------------------------------------------
+    # P5: console safety HUD — only when hud:=true (default false). A view-only
+    # node printing the live zone / scale / min-distance one-liner to the
+    # terminal for the 5-second legibility check and the demo capture.
+    # ------------------------------------------------------------------
+
+    hud_node = Node(
+        package="safecollab",
+        executable="hud_node",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+        condition=IfCondition(hud),
+    )
+
     return LaunchDescription(
         [
             headless_arg,
             safety_source_arg,
             path_seed_arg,
             rviz_arg,
+            hud_arg,
             # gz sim: exactly one of these two runs depending on headless argument
             gz_server,  # headless=true  -> server-only (CI / no display)
             gz_full,  # headless=false -> server + GUI (interactive)
@@ -402,7 +429,8 @@ def generate_launch_description():
             # --- safety loop: perception -> safety_monitor -> motion scale ---
             perception_node,  # Stream C
             safety_monitor,  # Stream F
-            # --- P5 visualisation (only when rviz:=true) ---
+            # --- P5 visualisation (only when rviz:=true / hud:=true) ---
             rviz_node,
+            hud_node,
         ]
     )
