@@ -59,6 +59,16 @@ REACH_Z: float = 0.82
 STANDING_Z: float = 1.10
 APPROACH_Z: float = 0.95
 
+#: Seconds the operator stands clear of the cell at the start of each traversal
+#: before approaching the tray. This opens a long, contiguous GREEN window (the
+#: operator is ~0.9 m from the arm's tray pose = beyond d_yellow) that is longer
+#: than one full robot kitting cycle (GO_TO_BIN→PICK→GO_TO_TRAY→DROP ≈ 9 s), so
+#: the arm can complete at least one uninterrupted cycle before the operator's
+#: next tray reach drives the zone to red and triggers a protective stop. Held
+#: fixed (not scaled by the ±40 % approach-speed randomisation) so the window is
+#: reliably long regardless of seed.
+STANDING_DWELL_S: float = 10.0
+
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -216,24 +226,29 @@ class OperatorPath:
         reach_x = TRAY_CENTRE[0] + rng.uniform(-TRAY_HALF_X * 0.8, TRAY_HALF_X * 0.8)
         reach_y = rng.uniform(-TRAY_HALF_Y * 0.6, TRAY_HALF_Y * 0.6)
 
-        # Timing scale (±40 % speed variation)
+        # Timing scale (±40 % speed variation) applied to the approach/reach/
+        # withdraw phase only; the standing dwell is held fixed (see below).
         t_scale = rng.uniform(0.7, 1.4)
+        d = STANDING_DWELL_S  # the long GREEN window before the approach begins
 
         waypoints = [
-            # 0 — standing back from table
+            # 0 — standing back from the table (start of the dwell)
             Waypoint(x=0.9, y=side_y, z=STANDING_Z, t=0.0),
-            # 1 — table edge, leaning toward tray area
-            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(2.0 * t_scale, 3)),
-            # 2 — hover above tray
-            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(4.0 * t_scale, 3)),
-            # 3 — tray reach (hand inside tray)
-            Waypoint(x=reach_x, y=reach_y, z=REACH_Z, t=round(5.5 * t_scale, 3)),
-            # 4 — withdraw (hand back above tray)
-            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(7.0 * t_scale, 3)),
-            # 5 — step back from table
-            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(9.0 * t_scale, 3)),
-            # 6 — return to standing
-            Waypoint(x=0.9, y=side_y, z=STANDING_Z, t=round(11.0 * t_scale, 3)),
+            # 1 — still standing back (end of the dwell): a contiguous green window
+            #     ≥ one full robot cycle, so the arm can kit uninterrupted here
+            Waypoint(x=0.9, y=side_y, z=STANDING_Z, t=round(d, 3)),
+            # 2 — table edge, leaning toward tray area
+            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 2.0 * t_scale, 3)),
+            # 3 — hover above tray
+            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(d + 4.0 * t_scale, 3)),
+            # 4 — tray reach (hand inside tray) → drives the zone to red
+            Waypoint(x=reach_x, y=reach_y, z=REACH_Z, t=round(d + 5.5 * t_scale, 3)),
+            # 5 — withdraw (hand back above tray)
+            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(d + 7.0 * t_scale, 3)),
+            # 6 — step back from table
+            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 9.0 * t_scale, 3)),
+            # 7 — return to standing
+            Waypoint(x=0.9, y=side_y, z=STANDING_Z, t=round(d + 11.0 * t_scale, 3)),
         ]
 
         return cls(waypoints)
