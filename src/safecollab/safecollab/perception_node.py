@@ -188,6 +188,7 @@ def detect_human(
     bgr_image: np.ndarray,
     *,
     min_area_px: float = 100.0,
+    conf_area_ref_px: float = 2000.0,
     hue_low: int = 20,
     hue_high: int = 40,
     sat_low: int = 100,
@@ -210,6 +211,11 @@ def detect_human(
         bgr_image: OpenCV-style BGR image (H × W × 3 ``uint8``).
         min_area_px: Minimum blob area (pixels²) to accept as a valid
                      detection.  Smaller blobs are ignored.
+        conf_area_ref_px: Reference blob area (pixels²) representing a full,
+                     clean operator detection.  ``confidence`` saturates to 1.0
+                     at or above this area and scales down for smaller/partial
+                     blobs.  Sized to the operator marker under the overhead
+                     camera so a normal detection is confident.
         hue_low, hue_high: HSV hue range (OpenCV ``[0, 180]`` convention).
         sat_low, sat_high: HSV saturation range.
         val_low, val_high: HSV value (brightness) range.
@@ -220,8 +226,9 @@ def detect_human(
 
         - ``u_px``, ``v_px``: centroid pixel coordinates.
         - ``area_px2``: blob area in pixels².
-        - ``confidence``: ratio of blob area to image area, clipped to
-          ``(0, 1]`` — a small blob in a large image gives low confidence.
+        - ``confidence``: blob area relative to the expected operator size
+          (``conf_area_ref_px``), clipped to ``(0, 1]`` — a full, solid blob is
+          confident; a partial/occluded blob scores lower.
     """
     if bgr_image is None or bgr_image.size == 0:
         return None
@@ -251,9 +258,18 @@ def detect_human(
     u = moments["m10"] / moments["m00"]
     v = moments["m01"] / moments["m00"]
 
-    h, w = bgr_image.shape[:2]
-    image_area = float(h * w)
-    confidence = min(1.0, area / image_area) if image_area > 0 else 0.0
+    # Confidence = how completely the blob fills the EXPECTED operator size,
+    # not its fraction of the whole frame. The old "area / image_area" made a
+    # clearly-visible overhead marker (a few thousand px in a 640×480 frame)
+    # score ~0.02 confidence, which maxed the σ noise term and inflated the
+    # ISO/TS 15066 thresholds so far (d_yellow ≈ 1.0 m) that the operator was
+    # NEVER far enough to register green in this cell. Normalising by a
+    # reference blob area (conf_area_ref_px) makes a full, solid detection
+    # confident (σ small → realistic thresholds → a real green window), while a
+    # partial/occluded blob still scores low (σ grows → more conservative).
+    confidence = (
+        min(1.0, area / conf_area_ref_px) if conf_area_ref_px > 0 else 0.0
+    )
 
     return u, v, area, confidence
 

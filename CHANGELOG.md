@@ -54,6 +54,30 @@ P5 — polish & demo (toward `v0.5.0`); see `docs/ROADMAP-P5.md`.
   walkthrough (windows, cues, GIF capture, the 5-second legibility check); the GIF
   lands at `docs/media/`.
 
+### Fixed
+
+- fix(motion): **align `/joint_states` to the planned trajectory joint order**.
+  The UR broadcaster publishes joints alphabetically (`elbow`, `shoulder_lift`,
+  `shoulder_pan`, …) while the Pilz trajectory uses `ur_manipulator` group order
+  (`shoulder_pan` first), so `motion_node` spliced the resume/hold waypoint with
+  `shoulder_pan` ↔ `elbow` swapped — the arm jerked and barely moved. It now
+  realigns the current state by joint name before use.
+- fix(perception): **realistic detection confidence so a green zone is reachable**.
+  Confidence was the blob's fraction of the whole frame (~0.02 for the overhead
+  marker), which maxed the σ term and inflated the ISO/TS 15066 thresholds
+  (d_yellow ≈ 1.0 m > cell size) so the operator was never far enough to register
+  green. Confidence now measures the blob against an expected operator size, so a
+  clean detection is confident (σ ≈ 0.10 m) and the robot gets a full-speed window.
+- fix(cell): **reachable feeder bins**. Bins were tucked behind the base (folded
+  back-reach) and then on the shoulder-singularity line (the mirrored `+y` reach
+  was unreachable). They now flank the base forward-of-centre at `(0.15, ±0.35)`
+  on a slightly widened table — a well-conditioned front-side pick.
+- fix(planner): **closed-loop leg pacing**. The planner advanced legs by wall-clock
+  time, so an SSM slow-down/stop near the operator abandoned the in-progress pick
+  ("arm stops short of the bin"). It now waits until the arm reaches each leg goal
+  (name-aligned joint check, generous timeout) before advancing, so a stop merely
+  delays the pick and the arm always completes it when the operator clears.
+
 ---
 
 ## [0.4.0] - 2026-06-28 — P4: robustness (generalisation, recovery, fail-safe re-acquire)

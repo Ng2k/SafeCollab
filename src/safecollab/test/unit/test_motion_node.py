@@ -229,6 +229,69 @@ def test_resume_first_position_is_current_joint_state():
     ), "first waypoint must be the halted position, not nominal[0]"
 
 
+def test_current_state_realigned_to_trajectory_joint_order():
+    """Current joint state is permuted into the trajectory's joint order.
+
+    /joint_states is published ALPHABETICALLY (elbow, shoulder_lift,
+    shoulder_pan, …) while the planned trajectory uses ur_manipulator GROUP
+    order (shoulder_pan, shoulder_lift, elbow, …). If the current state were
+    spliced in raw, shoulder_pan and elbow would be swapped in the resume/hold
+    waypoint — the scramble that made the arm jerk and barely move. The state
+    must be realigned to the trajectory's joint names before use.
+    """
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(
+        ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint"],
+        [0.0, 1.0],
+        [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+    )
+    logic.set_scale(0.0)  # protective stop
+    # Halted state arrives in /joint_states (alphabetical) order with names.
+    logic.set_joint_positions(
+        [0.3, 0.2, 0.1],  # elbow=0.3, shoulder_lift=0.2, shoulder_pan=0.1
+        ["elbow_joint", "shoulder_lift_joint", "shoulder_pan_joint"],
+    )
+
+    logic.set_scale(1.0)  # resume
+    cmd = logic.compute_command(resuming=True)
+    assert cmd is not None
+    _, _, positions = cmd
+    # Waypoint 0 must be in trajectory order: [shoulder_pan, shoulder_lift, elbow].
+    assert positions[0] == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_hold_command_realigns_current_state_to_trajectory_order():
+    """The protective-hold waypoint is also expressed in trajectory joint order."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(
+        ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint"],
+        [0.0, 1.0],
+        [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+    )
+    logic.set_joint_positions(
+        [0.3, 0.2, 0.1],
+        ["elbow_joint", "shoulder_lift_joint", "shoulder_pan_joint"],
+    )
+    cmd = logic.command_for_scale(0.0)  # protective stop => hold
+    assert cmd is not None
+    kind, _, _, positions = cmd
+    assert kind == "hold"
+    assert positions[0] == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_current_state_without_names_used_as_is():
+    """When names are omitted the state is used verbatim (historical behaviour)."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1", "j2"], [0.0, 1.0], [[0.0, 0.0], [1.0, 1.0]])
+    logic.set_scale(0.0)
+    logic.set_joint_positions([0.5, 0.7])  # no names
+    logic.set_scale(1.0)
+    cmd = logic.compute_command(resuming=True)
+    assert cmd is not None
+    _, _, positions = cmd
+    assert positions[0] == pytest.approx([0.5, 0.7])
+
+
 def test_resume_first_time_is_zero():
     """On resume, times[0] must be 0.0 (the new trajectory starts now)."""
     logic = MotionLogic()

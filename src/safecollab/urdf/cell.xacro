@@ -45,7 +45,13 @@
   <!-- geometry constants -->
   <xacro:property name="table_h"  value="0.74"/>   <!-- table top height above floor -->
   <xacro:property name="table_sx" value="1.20"/>
-  <xacro:property name="table_sy" value="0.80"/>
+  <!-- table depth (y): widened from 0.80 so the two feeder bins sit on the
+       robot's LEFT/RIGHT flanks at a natural UR5e reach radius (~0.41 m from
+       the base) instead of tucked in behind/under the base. The old bins at
+       base-rel (-0.20, ±0.25) forced a folded back-over-the-shoulder reach —
+       the arm looked like it "stopped short" of the box. Side bins give a clean
+       elbow-up side pick and keep bin work lateral (clear of the front operator). -->
+  <xacro:property name="table_sy" value="1.05"/>
 
   <!-- ================= world ================= -->
   <link name="world"/>
@@ -69,18 +75,26 @@
   </joint>
 
   <!-- ================= feeder bins (pick) ================= -->
+  <!-- Bins flank the base FORWARD-of-centre at world (0.15, ±0.35):
+       base-rel (0.25, ±0.35), radius ≈ 0.43 m. The forward offset is key:
+       bins on the pure-side line (base-rel x ≈ 0) sit near the UR5e SHOULDER
+       SINGULARITY (wrist centre over the shoulder axis), where the +y reach
+       becomes an awkward near-singular config the arm can't cleanly complete —
+       so one bin was reachable and the mirrored one was not. Pushing the bins
+       forward moves both off that singular line into a well-conditioned
+       front-side reach. planner_node's bin targets mirror these coordinates. -->
   <xacro:box_link name="bin_left"  sx="0.15" sy="0.15" sz="0.08" mass="0.5" material="bin_mat"/>
   <joint name="top_to_bin_left" type="fixed">
     <parent link="table_top"/>
     <child  link="bin_left"/>
-    <origin xyz="-0.30 0.25 0.04" rpy="0 0 0"/>
+    <origin xyz="0.15 0.35 0.04" rpy="0 0 0"/>
   </joint>
 
   <xacro:box_link name="bin_right" sx="0.15" sy="0.15" sz="0.08" mass="0.5" material="bin_mat"/>
   <joint name="top_to_bin_right" type="fixed">
     <parent link="table_top"/>
     <child  link="bin_right"/>
-    <origin xyz="-0.30 -0.25 0.04" rpy="0 0 0"/>
+    <origin xyz="0.15 -0.35 0.04" rpy="0 0 0"/>
   </joint>
 
   <!-- ================= shared kitting tray (drop) ================= -->

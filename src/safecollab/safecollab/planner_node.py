@@ -72,8 +72,12 @@ def kitting_legs(bin_side: str) -> list[KittingLeg]:
     """
     if bin_side not in ("left", "right"):
         raise ValueError(f"bin_side must be 'left' or 'right', got {bin_side!r}")
-    by = 0.25 if bin_side == "left" else -0.25
-    bx = -0.30
+    # Feeder-bin tool targets mirror cell.xacro: bins flank the base FORWARD of
+    # centre at world (0.15, ±0.35) — base-rel (0.25, ±0.35), a well-conditioned
+    # ~0.43 m front-side reach clear of the shoulder singularity (pure-side bins
+    # at base-rel x≈0 made the +y reach near-singular and unreachable).
+    by = 0.35 if bin_side == "left" else -0.35
+    bx = 0.15
     tx, ty = 0.35, 0.0
     # settle_s is the dwell AFTER the leg before the next is planned. DROP dwells
     # LONG so the arm LIVES at the shared tray for most of the cycle: the operator
@@ -112,6 +116,7 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
     import rclpy
     from rclpy.node import Node
     from geometry_msgs.msg import PoseStamped
+    from sensor_msgs.msg import JointState
     from std_msgs.msg import String
     from trajectory_msgs.msg import JointTrajectory
 
@@ -140,6 +145,44 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
     traj_pub = pub.create_publisher(JointTrajectory, "/motion/nominal_trajectory", 10)
     state_pub = pub.create_publisher(String, "/task/state", 10)
     log = pub.get_logger()
+
+    # Closed-loop pacing needs the live joint state. /joint_states is published in
+    # the broadcaster's (alphabetical) order; we index it BY NAME into the planning
+    # group order so the goal comparison is order-correct (same alignment pitfall
+    # motion_node handles). The planner waits until the arm actually reaches each
+    # leg goal before advancing, so an SSM slow-down/stop near the operator merely
+    # DELAYS the pick — it never abandons it half-finished (the "arm stops short of
+    # the bin" symptom of the old open-loop wall-clock pacing).
+    _JOINT_ORDER = [
+        "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+        "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+    ]
+    _latest_js: dict[str, float] = {}
+
+    def _on_joint_states(msg: "JointState") -> None:
+        for name, position in zip(msg.name, msg.position):
+            _latest_js[name] = position
+
+    pub.create_subscription(JointState, "/joint_states", _on_joint_states, 10)
+
+    def current_joints() -> list[float] | None:
+        if not all(name in _latest_js for name in _JOINT_ORDER):
+            return None
+        return [_latest_js[name] for name in _JOINT_ORDER]
+
+    def wait_until_reached(goal: list[float], timeout_s: float) -> bool:
+        # Returns True once every joint is within _REACH_TOL of the goal, or False
+        # if timeout_s elapses first (e.g. a long protective stop while the operator
+        # lingers). Spins the pub node so the joint-state callback actually fires.
+        _REACH_TOL = 0.05  # rad (~3° per joint)
+        deadline = time.time() + timeout_s
+        while rclpy.ok() and time.time() < deadline:
+            rclpy.spin_once(pub, timeout_sec=0.05)
+            cur = current_joints()
+            if cur is not None and max(abs(a - b) for a, b in zip(cur, goal)) < _REACH_TOL:
+                return True
+        return False
+
     log.info("[planner_node] MoveItPy up; planning group ur_manipulator")
 
     def pose_goal(xyz: tuple[float, float, float]) -> PoseStamped:
@@ -200,14 +243,14 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
                     return joints
         return None
 
-    def plan_and_publish(leg: "KittingLeg") -> float:
-        # Returns the planned trajectory duration (s) so the caller paces the next
-        # leg to when the arm actually arrives (publishing faster than the arm
-        # executes just re-commands it before it reaches the target).
+    def plan_and_publish(leg: "KittingLeg") -> tuple[float, list[float] | None]:
+        # Returns (planned trajectory duration, goal joint config). The caller waits
+        # until the arm actually reaches the goal config before advancing, so a
+        # slowed/stopped leg is completed rather than abandoned.
         joints = resolve_joints(leg.xyz)
         if joints is None:
             log.warn(f"[planner_node] {leg.state}: IK unreachable at {leg.xyz}")
-            return 0.0
+            return 0.0, None
         goal_state = RobotState(robot_model)
         goal_state.set_joint_group_positions(_PLAN_GROUP, joints)
         for _ in range(3):
@@ -226,9 +269,9 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
                 log.info(
                     f"[planner_node] {leg.state} PTP -> {len(joint_traj.points)} pts, {dur:.1f}s"
                 )
-                return dur
+                return dur, joints
         log.warn(f"[planner_node] {leg.state}: PTP plan FAILED at {leg.xyz}")
-        return 0.0
+        return 0.0, None
 
     try:
         i = 0
@@ -236,11 +279,18 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
             for leg in kitting_legs("left" if i % 2 == 0 else "right"):
                 if not rclpy.ok():
                     break
-                dur = plan_and_publish(leg)
-                # Wait for the arm to reach the target (planned duration) before the
-                # next leg, plus a settle margin. Under SSM slow-down the real motion
-                # takes longer; the margin keeps most legs completing before advancing.
-                time.sleep(max(leg.settle_s, dur + 0.5))
+                dur, goal = plan_and_publish(leg)
+                # Closed-loop pacing: wait until the arm actually REACHES the leg
+                # goal before advancing, then apply the settle dwell. The timeout is
+                # generous (≈4× the full-speed duration) so an SSM slow-down merely
+                # delays arrival; only a prolonged protective stop (operator lingering
+                # in the shared space) hits the timeout and moves on. This is what
+                # stops the arm abandoning a pick half-way when the human is near.
+                if goal is not None:
+                    reached = wait_until_reached(goal, timeout_s=max(2.0, dur * 4.0 + 4.0))
+                    if not reached:
+                        log.info(f"[planner_node] {leg.state}: goal not reached before timeout")
+                time.sleep(leg.settle_s)
             i += 1
     except KeyboardInterrupt:
         pass
