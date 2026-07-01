@@ -90,7 +90,9 @@ def load_safety_config(path) -> SimpleNamespace:
     return SimpleNamespace(
         s_min=float(safety["s_min"]),
         loss_timeout=float(safety["loss_timeout"]),
-        robot_frames=list(safety.get("robot_frames", ["tcp", "wrist", "elbow"])),
+        robot_frames=list(
+            safety.get("robot_frames", ["tool0", "wrist_3_link", "forearm_link"])
+        ),
         marker_radius=float(safety.get("marker_radius", 0.15)),
         marker_label_offset=float(safety.get("marker_label_offset", 0.25)),
         marker_label_height=float(safety.get("marker_label_height", 0.20)),

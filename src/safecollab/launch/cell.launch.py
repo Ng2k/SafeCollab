@@ -26,7 +26,7 @@
 #
 # Quick introspection after launch:
 #   ros2 control list_controllers          # joint_state_broadcaster + arm_controller active
-#   ros2 run tf2_tools view_frames         # world->tcp chain and world->human_gt
+#   ros2 run tf2_tools view_frames         # world->tool0 chain and world->human_gt
 #   ros2 topic hz /camera/image            # ~30 Hz from the gz camera bridge
 #   ros2 topic echo /task/state            # kitting SM state
 #   ros2 topic echo /motion/nominal_trajectory  # trajectory from planner_node
@@ -399,7 +399,7 @@ def generate_launch_description():
     # ------------------------------------------------------------------
     # Stream F: safety_monitor — closes the loop. Reads the perceived world->human
     # TF + /human/uncertainty (σ), sweeps min separation over robot frames
-    # (tcp, link_6, link_3 — see config/safety.yaml), calls safety_logic.classify()
+    # (tool0, wrist_3_link, forearm_link — see config/safety.yaml), calls classify()
     # and publishes /safety/scale (Float32 0..1) + /safety/zone (green|yellow|red|
     # lost). Fail-safe: stale/absent human TF -> ("lost", 0.0) protective stop.
     # ------------------------------------------------------------------
