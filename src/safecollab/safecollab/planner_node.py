@@ -54,8 +54,13 @@ class KittingLeg:
 # transits move at the higher "above" height, LIN dips/lifts straight into and out
 # of the bin/tray. Targets sit in the UR5e's comfortable reach envelope and match
 # the cell furniture placed in cell.xacro. bin side alternates each cycle.
-_ABOVE_Z = 0.95
-_PICK_Z = 0.82
+# Heights (world z). table_top is 0.74; bins are 0.08 m boxes (top 0.82) and the
+# tray top is 0.78. _PICK_Z=0.78 makes the tool DIP INTO the bin (4 cm below the
+# rim) to grasp, and place ON the tray surface — instead of stopping at the rim /
+# hovering above, which read as "the arm just goes on top and never picks". The
+# raised _ABOVE_Z gives a clearly visible ~0.20 m vertical pick/place stroke.
+_ABOVE_Z = 0.98
+_PICK_Z = 0.78
 
 
 def kitting_legs(bin_side: str) -> list[KittingLeg]:
@@ -79,20 +84,20 @@ def kitting_legs(bin_side: str) -> list[KittingLeg]:
     by = 0.35 if bin_side == "left" else -0.35
     bx = 0.15
     tx, ty = 0.35, 0.0
-    # settle_s is the dwell AFTER the leg before the next is planned. DROP dwells
-    # LONG so the arm LIVES at the shared tray for most of the cycle: the operator
-    # reaches into that same tray, so while the arm is parked there any operator
-    # reach drives the zone to red (protective stop), yet when the operator stands
-    # clear (~1 m away) the zone is green even with the arm at the tray. That makes
-    # a clean green→yellow→red escalation recur on essentially every operator cycle
-    # (AT-6 needs the behaviour to generalise across ≥3 distinct random paths).
+    # settle_s is the dwell AFTER the leg before the next is planned. The DROP
+    # dwell keeps the arm at the shared tray so an operator reach there co-occurs
+    # with the arm and drives a red protective stop (AT-6 needs the escalation to
+    # recur across ≥3 distinct random paths). It no longer has to be LONG: closed-
+    # loop pacing makes the arm WAIT at the tray whenever the operator is close, so
+    # co-occupancy is reliable even with a shorter dwell — which keeps the demo
+    # snappier (the arm isn't parked idle at the tray when the operator is clear).
     return [
-        KittingLeg(f"GO_TO_BIN_{bin_side.upper()}", "ptp", (bx, by, _ABOVE_Z), 0.5),
-        KittingLeg("PICK", "lin", (bx, by, _PICK_Z), 0.8),
-        KittingLeg("LIFT_BIN", "lin", (bx, by, _ABOVE_Z), 0.4),
-        KittingLeg("GO_TO_TRAY", "ptp", (tx, ty, _ABOVE_Z), 0.5),
-        KittingLeg("DROP", "lin", (tx, ty, _PICK_Z), 4.0),
-        KittingLeg("LIFT_TRAY", "lin", (tx, ty, _ABOVE_Z), 0.6),
+        KittingLeg(f"GO_TO_BIN_{bin_side.upper()}", "ptp", (bx, by, _ABOVE_Z), 0.4),
+        KittingLeg("PICK", "lin", (bx, by, _PICK_Z), 0.6),
+        KittingLeg("LIFT_BIN", "lin", (bx, by, _ABOVE_Z), 0.3),
+        KittingLeg("GO_TO_TRAY", "ptp", (tx, ty, _ABOVE_Z), 0.4),
+        KittingLeg("DROP", "lin", (tx, ty, _PICK_Z), 2.0),
+        KittingLeg("LIFT_TRAY", "lin", (tx, ty, _ABOVE_Z), 0.4),
     ]
 
 
@@ -281,13 +286,16 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
                     break
                 dur, goal = plan_and_publish(leg)
                 # Closed-loop pacing: wait until the arm actually REACHES the leg
-                # goal before advancing, then apply the settle dwell. The timeout is
-                # generous (≈4× the full-speed duration) so an SSM slow-down merely
-                # delays arrival; only a prolonged protective stop (operator lingering
-                # in the shared space) hits the timeout and moves on. This is what
-                # stops the arm abandoning a pick half-way when the human is near.
+                # goal before advancing, then apply the settle dwell. wait_until_reached
+                # returns the instant the arm arrives, so a LARGE timeout costs nothing
+                # on a clear (green) cycle — it only bounds how long a BLOCKED leg waits
+                # for the operator to step clear. The bin on the operator's approach
+                # side used to hit the old ~8 s timeout mid-descent and get skipped
+                # (the arm "picked" only one bin); a patient ~15 s budget lets that
+                # PICK/DROP wait the operator out and actually complete the dip, while
+                # green cycles stay just as snappy.
                 if goal is not None:
-                    reached = wait_until_reached(goal, timeout_s=max(2.0, dur * 4.0 + 4.0))
+                    reached = wait_until_reached(goal, timeout_s=max(15.0, dur * 6.0 + 10.0))
                     if not reached:
                         log.info(f"[planner_node] {leg.state}: goal not reached before timeout")
                 time.sleep(leg.settle_s)

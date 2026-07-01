@@ -77,6 +77,16 @@ P5 — polish & demo (toward `v0.5.0`); see `docs/ROADMAP-P5.md`.
   ("arm stops short of the bin"). It now waits until the arm reaches each leg goal
   (name-aligned joint check, generous timeout) before advancing, so a stop merely
   delays the pick and the arm always completes it when the operator clears.
+- fix(planner): **pick descends INTO the bin and both bins get picked**. The pick
+  height equalled the bin's top surface (arm stopped on the rim / hovered above the
+  tray); it now dips to `z=0.78` from a raised `0.98` hover — a visible ~0.20 m
+  stroke. The pacing budget is also more patient (~15 s), so the bin on the
+  operator's approach side waits the operator out instead of timing out mid-descent
+  and being skipped — both bins are now reliably picked. Cadence is tighter too
+  (shorter DROP/settle dwells), kept snappy while the SSM escalation still recurs.
+- fix(human): **smoother operator**. The gz operator body was moved at 10 Hz; raised
+  to 30 Hz (background thread, so no impact on the TF broadcast or path advancement)
+  for visibly more fluid operator motion.
 
 ---
 

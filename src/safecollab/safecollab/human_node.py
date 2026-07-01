@@ -248,16 +248,17 @@ class OperatorPath:
             Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(d + 4.0 * t_scale, 3)),
             # 4 — tray reach (hand inside tray) → drives the zone to red
             Waypoint(x=reach_x, y=reach_y, z=REACH_Z, t=round(d + 5.5 * t_scale, 3)),
-            # 4b — HOLD the reach: the operator works in the shared tray for a few
-            #      seconds. This lengthens the co-occupancy window so a reach reliably
-            #      overlaps the arm's time at the tray, giving a red protective stop.
-            Waypoint(x=reach_x, y=reach_y, z=REACH_Z, t=round(d + 9.5 * t_scale, 3)),
+            # 4b — HOLD the reach: the operator works in the shared tray briefly.
+            #      Kept short (~2 s) for a snappier demo — closed-loop pacing already
+            #      makes the arm WAIT at the tray while the operator is close, so the
+            #      red co-occupancy is reliable without a long static hold here.
+            Waypoint(x=reach_x, y=reach_y, z=REACH_Z, t=round(d + 7.5 * t_scale, 3)),
             # 5 — withdraw (hand back above tray)
-            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(d + 11.0 * t_scale, 3)),
+            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(d + 9.0 * t_scale, 3)),
             # 6 — step back from table
-            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 13.0 * t_scale, 3)),
+            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 11.0 * t_scale, 3)),
             # 7 — return to standing (well clear again)
-            Waypoint(x=1.0, y=side_y * 1.1, z=STANDING_Z, t=round(d + 15.0 * t_scale, 3)),
+            Waypoint(x=1.0, y=side_y * 1.1, z=STANDING_Z, t=round(d + 13.0 * t_scale, 3)),
         ]
 
         return cls(waypoints)
@@ -393,7 +394,7 @@ def main(args=None):  # pragma: no cover
         Generates a random ``OperatorPath`` at start-up, then replaces it with a
         fresh random path each time the current path completes.  Broadcasts the
         ground-truth ``world → human_gt`` TF at 50 Hz and moves the yellow gz
-        operator entity at 10 Hz so perception_node can detect it.
+        operator entity at 30 Hz so perception_node can detect it.
         """
 
         _GT_FRAME = "human_gt"
@@ -468,7 +469,7 @@ def main(args=None):  # pragma: no cover
             if self._gz_node is not None:
                 self.get_logger().info(
                     "[human_node] gz transport available; operator body will "
-                    "track the path at 10 Hz via /world/empty/set_pose"
+                    "track the path at 30 Hz via /world/empty/set_pose"
                 )
             else:
                 self.get_logger().warning(
@@ -521,7 +522,7 @@ def main(args=None):  # pragma: no cover
         def _gz_pose_worker(self) -> None:
             """Background loop: push the latest target pose to gz, off the timer.
 
-            Drains ``_gz_target`` at ~20 Hz and calls the synchronous (possibly
+            Drains ``_gz_target`` at ~30 Hz and calls the synchronous (possibly
             slow) gz ``set_pose`` service here so it can never stall the ROS timer
             that advances the path and broadcasts the ground-truth TF.
             """
@@ -533,8 +534,10 @@ def main(args=None):  # pragma: no cover
                     target = self._gz_target
                 if target is not None:
                     self._set_gz_pose(*target)
-                time.sleep(0.1)  # ~10 Hz best-effort — enough for smooth visual
-                # tracking while keeping gz-service load (and headless CPU) low.
+                time.sleep(0.033)  # ~30 Hz best-effort — smoother visual operator
+                # tracking. On a background thread (never the ROS timer), so the extra
+                # gz-service calls can't stall path advancement or the 50 Hz TF; the
+                # cost is only a little more gz-transport traffic.
 
         def _set_gz_pose(self, x: float, y: float, z: float) -> None:
             """Move the yellow operator gz entity to ``(x, y, z)`` via set_pose.
