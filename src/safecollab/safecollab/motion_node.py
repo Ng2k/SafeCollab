@@ -52,6 +52,7 @@ def load_motion_config(path) -> SimpleNamespace:
         hold_time_s=float(motion.get("hold_time_s", _DEFAULT_HOLD_TIME_S)),
     )
 
+
 # ROS 2 is not available in the pure-Python unit-test environment (see
 # requirements.txt — rclpy is an apt package, not a pip package).
 # Guard the imports so MotionLogic can be imported and tested without ROS.

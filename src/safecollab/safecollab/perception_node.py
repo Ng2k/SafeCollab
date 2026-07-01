@@ -267,9 +267,7 @@ def detect_human(
     # reference blob area (conf_area_ref_px) makes a full, solid detection
     # confident (σ small → realistic thresholds → a real green window), while a
     # partial/occluded blob still scores low (σ grows → more conservative).
-    confidence = (
-        min(1.0, area / conf_area_ref_px) if conf_area_ref_px > 0 else 0.0
-    )
+    confidence = min(1.0, area / conf_area_ref_px) if conf_area_ref_px > 0 else 0.0
 
     return u, v, area, confidence
 

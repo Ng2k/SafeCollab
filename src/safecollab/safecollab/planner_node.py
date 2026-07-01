@@ -159,8 +159,12 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
     # DELAYS the pick — it never abandons it half-finished (the "arm stops short of
     # the bin" symptom of the old open-loop wall-clock pacing).
     _JOINT_ORDER = [
-        "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
-        "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "elbow_joint",
+        "wrist_1_joint",
+        "wrist_2_joint",
+        "wrist_3_joint",
     ]
     _latest_js: dict[str, float] = {}
 
@@ -184,7 +188,10 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
         while rclpy.ok() and time.time() < deadline:
             rclpy.spin_once(pub, timeout_sec=0.05)
             cur = current_joints()
-            if cur is not None and max(abs(a - b) for a, b in zip(cur, goal)) < _REACH_TOL:
+            if (
+                cur is not None
+                and max(abs(a - b) for a, b in zip(cur, goal)) < _REACH_TOL
+            ):
                 return True
         return False
 
@@ -194,8 +201,12 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
         p = PoseStamped()
         p.header.frame_id = _PLAN_FRAME
         p.pose.position.x, p.pose.position.y, p.pose.position.z = xyz
-        (p.pose.orientation.w, p.pose.orientation.x,
-         p.pose.orientation.y, p.pose.orientation.z) = _DOWN_QUAT
+        (
+            p.pose.orientation.w,
+            p.pose.orientation.x,
+            p.pose.orientation.y,
+            p.pose.orientation.z,
+        ) = _DOWN_QUAT
         return p
 
     # Deterministic IK: KDL is a *non-deterministic* numerical solver, so replanning
@@ -222,8 +233,8 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
         # actually lands on the world target. Seed shoulder_pan at the target so KDL
         # converges to a compact, operator-avoiding config.
         candidates = (
-            (xyz[0], xyz[1], xyz[2]),                              # world
-            (xyz[0] - _UR_BASE_XY[0], xyz[1], xyz[2] - 0.74),      # base_link
+            (xyz[0], xyz[1], xyz[2]),  # world
+            (xyz[0] - _UR_BASE_XY[0], xyz[1], xyz[2] - 0.74),  # base_link
         )
         pan = math.atan2(xyz[1] - _UR_BASE_XY[1], xyz[0] - _UR_BASE_XY[0])
         pose = pose_goal(xyz).pose
@@ -266,10 +277,14 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
             params.planner_id = "PTP"
             result = arm.plan(single_plan_parameters=params)
             if result and getattr(result, "trajectory", None):
-                joint_traj = result.trajectory.get_robot_trajectory_msg().joint_trajectory
+                joint_traj = (
+                    result.trajectory.get_robot_trajectory_msg().joint_trajectory
+                )
                 state_pub.publish(String(data=leg.state))
                 traj_pub.publish(joint_traj)
-                last_t = joint_traj.points[-1].time_from_start if joint_traj.points else None
+                last_t = (
+                    joint_traj.points[-1].time_from_start if joint_traj.points else None
+                )
                 dur = (last_t.sec + last_t.nanosec * 1e-9) if last_t else 0.0
                 log.info(
                     f"[planner_node] {leg.state} PTP -> {len(joint_traj.points)} pts, {dur:.1f}s"
@@ -295,9 +310,13 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
                 # PICK/DROP wait the operator out and actually complete the dip, while
                 # green cycles stay just as snappy.
                 if goal is not None:
-                    reached = wait_until_reached(goal, timeout_s=max(15.0, dur * 6.0 + 10.0))
+                    reached = wait_until_reached(
+                        goal, timeout_s=max(15.0, dur * 6.0 + 10.0)
+                    )
                     if not reached:
-                        log.info(f"[planner_node] {leg.state}: goal not reached before timeout")
+                        log.info(
+                            f"[planner_node] {leg.state}: goal not reached before timeout"
+                        )
                 time.sleep(leg.settle_s)
             i += 1
     except KeyboardInterrupt:

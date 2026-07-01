@@ -70,8 +70,12 @@ def _moveit_params() -> dict:
     cfg = (
         MoveItConfigsBuilder("safecollab_cell", package_name="safecollab")
         .robot_description(file_path=os.path.join(share, "urdf", "cell.xacro"))
-        .robot_description_semantic(file_path=os.path.join(share, "srdf", "cell.srdf.xacro"))
-        .robot_description_kinematics(file_path=os.path.join(share, "config", "kinematics.yaml"))
+        .robot_description_semantic(
+            file_path=os.path.join(share, "srdf", "cell.srdf.xacro")
+        )
+        .robot_description_kinematics(
+            file_path=os.path.join(share, "config", "kinematics.yaml")
+        )
         .joint_limits(file_path=os.path.join(share, "config", "joint_limits.yaml"))
         .pilz_cartesian_limits(
             file_path=os.path.join(share, "config", "pilz_cartesian_limits.yaml")
@@ -89,9 +93,7 @@ def _moveit_params() -> dict:
     names = params.pop("planning_pipelines")
     params["planning_pipelines"] = {
         "pipeline_names": names,
-        "default_planning_pipeline": params.get(
-            "default_planning_pipeline", names[0]
-        ),
+        "default_planning_pipeline": params.get("default_planning_pipeline", names[0]),
     }
     return params
 

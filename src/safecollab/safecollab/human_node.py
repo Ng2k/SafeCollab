@@ -243,7 +243,9 @@ class OperatorPath:
             # 1 — still standing back (end of the dwell): a contiguous green window
             Waypoint(x=1.0, y=side_y * 1.1, z=STANDING_Z, t=round(d, 3)),
             # 2 — table edge, leaning toward tray area
-            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 2.0 * t_scale, 3)),
+            Waypoint(
+                x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 2.0 * t_scale, 3)
+            ),
             # 3 — hover above tray
             Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(d + 4.0 * t_scale, 3)),
             # 4 — tray reach (hand inside tray) → drives the zone to red
@@ -256,9 +258,13 @@ class OperatorPath:
             # 5 — withdraw (hand back above tray)
             Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(d + 9.0 * t_scale, 3)),
             # 6 — step back from table
-            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 11.0 * t_scale, 3)),
+            Waypoint(
+                x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 11.0 * t_scale, 3)
+            ),
             # 7 — return to standing (well clear again)
-            Waypoint(x=1.0, y=side_y * 1.1, z=STANDING_Z, t=round(d + 13.0 * t_scale, 3)),
+            Waypoint(
+                x=1.0, y=side_y * 1.1, z=STANDING_Z, t=round(d + 13.0 * t_scale, 3)
+            ),
         ]
 
         return cls(waypoints)
