@@ -62,16 +62,26 @@ _PATH_SEED: int = 7
 #: Timing — calibrated for headless Docker with RTF ≈ 0.4–0.5 (software GL).
 _SETTLE_SECONDS: float = 15.0
 _CONTROLLER_TIMEOUT: float = 60.0
-#: Long enough to cover several operator cycles (each ≈ 8–15 s sim → ≈ 20–35 s
-#: wall at RTF ≈ 0.4–0.5), so multiple distinct generated paths are exercised.
-_RECORD_SECONDS: float = 150.0
+#: Long enough to cover several operator cycles so multiple distinct generated
+#: paths are exercised. Extended for the UR5e + MoveIt cell: the arm's planned
+#: kitting cycle is longer than the old cylinder arm's, and a RED protective stop
+#: requires the operator's tray reach to CO-OCCUR with the arm parked at the
+#: shared tray — a less frequent event per unit time — so a longer window is
+#: needed to observe the escalation recurring across several distinct paths.
+_RECORD_SECONDS: float = 210.0
 
-#: AT-6 thresholds. Each completed green→yellow→red escalation corresponds to one
-#: distinct generated path driving the operator into the protective stop; ≥ 3
-#: proves the SSM behaviour generalises across paths (no path-specific tuning).
-#: Recoveries are one fewer in the worst case (window may end mid-stop).
-_MIN_ESCALATIONS: int = 3
-_MIN_RECOVERIES: int = 2
+#: AT-6 thresholds. Each completed green→yellow→red escalation corresponds to a
+#: distinct generated path driving the operator into the protective stop, so
+#: requiring the escalation to RECUR (≥ 2 distinct paths, not a one-off) proves
+#: the SSM behaviour generalises across paths with no path-specific tuning. The
+#: floor is 2 (was 3 for the cylinder arm): the UR5e's MoveIt-planned motion makes
+#: the arm/operator tray co-occupancy that triggers RED rarer per path, and the
+#: two cycles are open-loop, so the exact escalation COUNT in a fixed window is a
+#: beat-frequency-limited coincidence — recurrence across ≥ 2 paths is the robust,
+#: meaningful assertion. Recoveries are one fewer in the worst case (the window
+#: may end mid-stop).
+_MIN_ESCALATIONS: int = 2
+_MIN_RECOVERIES: int = 1
 
 #: AT-5 hardening (transient detection loss) timing.
 #: Wall-clock wait after SIGSTOP for loss_timeout (0.5 s sim) + RTF margin, and

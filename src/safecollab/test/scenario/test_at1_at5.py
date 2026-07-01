@@ -279,7 +279,7 @@ class TestSSMScenario(unittest.TestCase):
             "AT-4 FAIL: /arm_controller/joint_trajectory published no messages "
             f"in the {_RECORD_SECONDS:.0f} s recording window. "
             "motion_node must publish re-timed trajectory commands when scale > 0; "
-            "check that task_node is publishing /motion/nominal_trajectory and "
+            "check that planner_node is publishing /motion/nominal_trajectory and "
             "motion_node is running.",
         )
 

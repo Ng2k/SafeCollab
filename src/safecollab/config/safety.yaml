@@ -23,21 +23,19 @@
 #
 # robot_frames
 #   TF frame names to include in the min-distance sweep.  Must be a subset of
-#   the frames published by the arm's robot_state_publisher (arm.xacro / Stream A).
-#   Tcp and link_6 (the final wrist joint's link) are the highest-risk frames;
-#   link_3 (the elbow joint's link) is included as a second backstop, since the
-#   arm can swing the elbow close to the operator even when the TCP is clear.
-#   The safety monitor takes the MINIMUM distance over all frames. Link names
-#   match arm.xacro's actual link naming (link_1..link_6, tcp) — there are no
-#   links literally named "wrist"/"elbow"; those names belong to the joints.
+#   the frames published by the UR5e's robot_state_publisher (ur_description).
+#   tool0 (the tool centre point) and wrist_3_link are the highest-risk frames;
+#   forearm_link is included as a second backstop, since the arm can swing the
+#   forearm close to the operator even when the tool is clear. The safety monitor
+#   takes the MINIMUM distance over all frames. Names match the UR5e link naming.
 
 safety:
   s_min: 0.10          # minimum speed scale in the yellow band (10 % of full speed)
   loss_timeout: 0.5    # seconds before a stale/missing human TF triggers the fail-safe
-  robot_frames:        # TF frame names swept for min-distance (AGENTS.md §3)
-    - tcp
-    - link_6
-    - link_3
+  robot_frames:        # UR5e TF frames swept for min-distance (AGENTS.md §3)
+    - tool0            # the tool centre point (end of the wrist) — highest risk
+    - wrist_3_link     # final wrist link
+    - forearm_link     # elbow/forearm — nearest arm body to a reaching operator
   marker_radius: 0.15        # radius (m) of the RViz safety-zone sphere at the human position
   marker_label_offset: 0.25  # gap (m) between the sphere top and the floating zone text label
   marker_label_height: 0.20  # RViz TEXT_VIEW_FACING glyph height (m) for the zone label

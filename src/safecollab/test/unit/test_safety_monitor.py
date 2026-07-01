@@ -104,7 +104,8 @@ class TestLoadSafetyConfig:
         assert len(safety_cfg.robot_frames) > 0
 
     def test_robot_frames_contains_expected_names(self, safety_cfg):
-        for expected in ("tcp", "link_6", "link_3"):
+        # UR5e TF frames swept for min-distance (see config/safety.yaml).
+        for expected in ("tool0", "wrist_3_link", "forearm_link"):
             assert expected in safety_cfg.robot_frames
 
     def test_marker_radius_is_positive(self, safety_cfg):

@@ -10,7 +10,7 @@
 #   4. joint_state_broadcaster + arm_controller spawners — ordered via OnProcessExit (Stream A)
 #   5. ros_gz_image bridge — gz camera/image -> ROS /camera/image (Stream C input)
 #   6. ros_gz_bridge       — gz clock -> ROS /clock (sim time for every node)
-#   7. task_node         — kitting state machine + nominal trajectory publisher (Stream E)
+#   7. planner_node      — MoveIt/Pilz pick-and-place; nominal trajectory publisher (Stream D')
 #   8. human_node        — ground-truth operator model, broadcasts world->human_gt TF (Stream E)
 #   9. motion_node       — fuses nominal trajectory * safety scale, commands arm (Stream D)
 #  10. perception_node   — camera -> perceived world->human TF + /human/uncertainty (Stream C)
@@ -29,7 +29,7 @@
 #   ros2 run tf2_tools view_frames         # world->tcp chain and world->human_gt
 #   ros2 topic hz /camera/image            # ~30 Hz from the gz camera bridge
 #   ros2 topic echo /task/state            # kitting SM state
-#   ros2 topic echo /motion/nominal_trajectory  # trajectory from task_node
+#   ros2 topic echo /motion/nominal_trajectory  # trajectory from planner_node
 #
 # Reference: _stream_a_smoke_test.launch.py was the provisional scaffold this file replaces.
 # It is kept for Stream A's own smoke-test verification and is not run by CI.
@@ -52,6 +52,48 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
+
+
+def _moveit_params() -> dict:
+    """Assemble the MoveIt config for planner_node's MoveItPy (Pilz pick-and-place).
+
+    Built here (not inside the node) so the nested planning-pipeline parameters are
+    declared as ROS node parameters — the only reliable way to get MoveItCpp to
+    load the Pilz planner. Returns the flat param dict merged onto planner_node.
+    """
+    import os
+
+    from ament_index_python.packages import get_package_share_directory
+    from moveit_configs_utils import MoveItConfigsBuilder
+
+    share = get_package_share_directory("safecollab")
+    cfg = (
+        MoveItConfigsBuilder("safecollab_cell", package_name="safecollab")
+        .robot_description(file_path=os.path.join(share, "urdf", "cell.xacro"))
+        .robot_description_semantic(file_path=os.path.join(share, "srdf", "cell.srdf.xacro"))
+        .robot_description_kinematics(file_path=os.path.join(share, "config", "kinematics.yaml"))
+        .joint_limits(file_path=os.path.join(share, "config", "joint_limits.yaml"))
+        .pilz_cartesian_limits(
+            file_path=os.path.join(share, "config", "pilz_cartesian_limits.yaml")
+        )
+        .planning_pipelines(
+            pipelines=["pilz_industrial_motion_planner"],
+            default_planning_pipeline="pilz_industrial_motion_planner",
+        )
+        .to_moveit_configs()
+    )
+    params = cfg.to_dict()
+    # to_dict() emits planning_pipelines as a FLAT list (what the move_group node
+    # reads), but MoveItCpp — which MoveItPy uses — reads planning_pipelines.
+    # pipeline_names. Reshape so the Pilz pipeline actually loads.
+    names = params.pop("planning_pipelines")
+    params["planning_pipelines"] = {
+        "pipeline_names": names,
+        "default_planning_pipeline": params.get(
+            "default_planning_pipeline", names[0]
+        ),
+    }
+    return params
 
 
 def generate_launch_description():
@@ -298,13 +340,17 @@ def generate_launch_description():
     # NOT silently broken references (per §6 ownership note).
     # ------------------------------------------------------------------
 
-    # Stream E: task_node — owns the kitting state machine (GO_TO_BIN -> PICK -> ...),
-    # publishes /motion/nominal_trajectory (JointTrajectory) and /task/state (String).
-    task_node = Node(
+    # Stream D': planner_node — MoveIt/Pilz pick-and-place planner for the UR5e.
+    # Resolves each Cartesian tool target to a joint config once (deterministic,
+    # FK-verified IK), plans the kitting cycle as Pilz PTP segments, and publishes
+    # each as /motion/nominal_trajectory (dense position JointTrajectory) plus
+    # /task/state (String). motion_node retimes it for SSM speed scaling.
+    planner_node = Node(
         package="safecollab",
-        executable="task_node",
+        executable="planner_node",
+        name="planner_node",
         output="screen",
-        parameters=[{"use_sim_time": True}],
+        parameters=[_moveit_params(), {"use_sim_time": True}],
     )
 
     # Stream E: human_node — drives the simulated operator along randomisable paths
@@ -423,7 +469,7 @@ def generate_launch_description():
             ),
             camera_bridge,
             # --- application nodes ---
-            task_node,
+            planner_node,
             human_node,
             motion_node,
             # --- safety loop: perception -> safety_monitor -> motion scale ---

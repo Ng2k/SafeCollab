@@ -7,11 +7,14 @@
        * two feeder bins (pick locations)
        * one shared kitting tray (drop location, co-occupied with the operator)
        * a down-looking camera sensor publishing on /camera/image (for Stream C)
-       * the 6-DOF arm (from arm.xacro) mounted on the table
+       * the 6-DOF Universal Robots UR5e (ur_description macro) mounted on the table
        * the gz_ros2_control::GazeboSimROS2ControlPlugin loading controllers.yaml -->
 <robot name="safecollab_cell" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-  <xacro:include filename="$(find safecollab)/urdf/arm.xacro"/>
+  <!-- Universal Robots UR5e: real model + solved kinematics from ur_description;
+       ur_simulation_gz supplies the gz_ros2_control wiring (ur_ros2_control macro). -->
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find ur_simulation_gz)/urdf/ur_gz.ros2_control.xacro"/>
 
   <!-- ================= materials ================= -->
   <material name="table_mat"><color rgba="0.6 0.45 0.3 1.0"/></material>
@@ -89,10 +92,26 @@
     <origin xyz="0.35 0.0 0.02" rpy="0 0 0"/>
   </joint>
 
-  <!-- ================= the arm (mounted on the table top, centred at the back) ================= -->
-  <xacro:kitting_arm parent="table_top">
+  <!-- ================= the arm: Universal Robots UR5e ================= -->
+  <!-- Mounted on the table top toward the back. UR joint names already match
+       config/controllers.yaml, so the arm_controller + joint_state_broadcaster
+       wiring is unchanged. force_abs_paths=true so gz (and RViz) resolve the UR
+       meshes by absolute path. The gz_ros2_control PLUGIN is declared once below
+       (shared with nothing else); ur_ros2_control adds the <ros2_control> system
+       block with position/velocity/effort interfaces on the six joints. -->
+  <xacro:property name="ur_cfg" value="$(find ur_description)/config/ur5e"/>
+  <xacro:ur_robot
+      name="ur5e"
+      tf_prefix=""
+      parent="table_top"
+      joint_limits_parameters_file="${ur_cfg}/joint_limits.yaml"
+      kinematics_parameters_file="${ur_cfg}/default_kinematics.yaml"
+      physical_parameters_file="${ur_cfg}/physical_parameters.yaml"
+      visual_parameters_file="${ur_cfg}/visual_parameters.yaml"
+      force_abs_paths="true">
     <origin xyz="-0.10 0.0 0.0" rpy="0 0 0"/>
-  </xacro:kitting_arm>
+  </xacro:ur_robot>
+  <xacro:ur_ros2_control name="ur5e" tf_prefix=""/>
 
   <!-- ================= camera sensor (Stream C) ================= -->
   <!-- Mast rising from the table to hold the overhead camera. It is tall

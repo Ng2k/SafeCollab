@@ -316,8 +316,8 @@ def test_resume_without_joint_positions_falls_back_to_nominal():
 def test_resume_mid_leg_does_not_backtrack_to_leg_start():
     """A stop part-way through a [start, end] leg resumes straight on to end.
 
-    task_node publishes each leg as a 2-waypoint trajectory [leg_start, leg_end].
-    If the robot is halted between them, resume must NOT re-insert leg_start —
+    This exercises the resume path with a minimal 2-waypoint leg [leg_start,
+    leg_end]. If the robot is halted between them, resume must NOT re-insert leg_start —
     that would drive the arm backward then forward again (a jerk, and motion the
     operator would not expect in a shared workspace). The resumed trajectory is
     [current, leg_end] only.
@@ -398,7 +398,7 @@ def test_scenario_trajectory_then_stop_then_resume():
     """
     logic = MotionLogic()
 
-    # Step 1: task_node publishes nominal trajectory (/motion/nominal_trajectory)
+    # Step 1: planner_node publishes nominal trajectory (/motion/nominal_trajectory)
     logic.set_nominal_trajectory(
         ["j1", "j2"],
         [0.0, 1.0, 2.0],
@@ -618,7 +618,7 @@ def test_command_for_new_leg_holds_when_stopped():
     logic.set_joint_positions([0.4])
     logic.command_for_scale(1.0)
     logic.command_for_scale(0.0)  # protective stop in effect
-    cmd = logic.command_for_new_leg()  # task_node advances a leg during the stop
+    cmd = logic.command_for_new_leg()  # planner_node advances a leg during the stop
     assert cmd is not None and cmd[0] == "hold"
     assert cmd[3] == [[0.4]]  # keep holding current state, not the new leg
 

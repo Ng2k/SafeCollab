@@ -277,7 +277,7 @@ class MotionLogic:
 
         Issues the leg re-timed at the current scale, anchored at the current joint
         state. While a protective stop is in effect it keeps holding instead of
-        starting the new leg (task_node advances legs open-loop, even during a stop).
+        starting the new leg (planner_node advances legs open-loop, even during a stop).
 
         Returns the same ``(kind, joint_names, times, positions)`` shape as
         :meth:`command_for_scale`, or ``None`` when there is nothing to command.

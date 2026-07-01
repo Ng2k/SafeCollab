@@ -18,7 +18,7 @@ It is a live experiment, not a log dump — two things on screen:
 ```
 ┌────────────────────────────────────────────┐
 │  RViz                                       │
-│  • robot model                              │
+│  • UR5e arm (MoveIt/Pilz pick-and-place)    │
 │  • camera image (the overhead cell view)    │
 │  • safety-zone SPHERE at the operator       │
 │  • floating GREEN/YELLOW/RED/LOST label     │
@@ -29,10 +29,12 @@ It is a live experiment, not a log dump — two things on screen:
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-As the operator approaches the tray, the sphere/label and HUD go
-`GREEN → YELLOW → RED`, the arm slows then stops (`speed 0%`); as the operator
-retreats it resumes. Freezing perception makes it fail-safe to grey `LOST`, then
-re-acquire.
+The arm is a real **Universal Robots UR5e**; its kitting motion (bin → tray) is
+planned by **MoveIt** with the deterministic Pilz industrial planner, then
+re-timed for ISO/TS 15066 speed scaling by `motion_node`. As the operator
+approaches the shared tray, the sphere/label and HUD go `GREEN → YELLOW → RED`,
+the UR5e slows then stops (`speed 0%`); as the operator retreats it resumes.
+Freezing perception makes it fail-safe to grey `LOST`, then re-acquire.
 
 > **Gazebo runs headless by default** (offscreen rendering) — RViz shows the
 > robot, the camera feed, and the zones, so the raw Gazebo window is redundant

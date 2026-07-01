@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- cell.srdf.xacro — MoveIt semantic description for the SafeCollab cell.
+     The robot name MUST match cell.xacro's <robot name="safecollab_cell">.
+     We reuse ur_moveit_config's ur_srdf macro verbatim: it defines the
+     `ur_manipulator` planning group (chain base_link → tool0), the named UR
+     states, and the UR self-collision disable pairs — all against the standard
+     UR link names, which our cell uses with no tf_prefix.
+
+     The static cell furniture (table, bins, tray, camera mast) lives in the same
+     robot_description. We disable collisions between the UR and that furniture so
+     Pilz PTP/LIN planning to the pick/drop poses is not blocked by the arm base
+     resting on the table or the tool hovering just above it; real operator-safety
+     is handled by the SSM loop (safety_monitor), not by MoveIt collision checks. -->
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="safecollab_cell">
+
+  <xacro:include filename="$(find ur_moveit_config)/srdf/ur_macro.srdf.xacro"/>
+  <xacro:ur_srdf/>
+
+  <!-- UR arm links vs. static cell furniture: allowed (see rationale above). -->
+  <xacro:macro name="allow_cell" params="arm">
+    <disable_collisions link1="${arm}" link2="table" reason="Environment"/>
+    <disable_collisions link1="${arm}" link2="bin_left" reason="Environment"/>
+    <disable_collisions link1="${arm}" link2="bin_right" reason="Environment"/>
+    <disable_collisions link1="${arm}" link2="kitting_tray" reason="Environment"/>
+    <disable_collisions link1="${arm}" link2="camera_mast" reason="Environment"/>
+  </xacro:macro>
+  <xacro:allow_cell arm="base_link_inertia"/>
+  <xacro:allow_cell arm="shoulder_link"/>
+  <xacro:allow_cell arm="upper_arm_link"/>
+  <xacro:allow_cell arm="forearm_link"/>
+  <xacro:allow_cell arm="wrist_1_link"/>
+  <xacro:allow_cell arm="wrist_2_link"/>
+  <xacro:allow_cell arm="wrist_3_link"/>
+
+</robot>
