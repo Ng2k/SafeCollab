@@ -205,10 +205,17 @@ drop --gz-gui (RViz still shows everything)."
     # No --rm: keep the container so 'docker logs' survives a start-up crash;
     # teardown removes it (docker rm -f) on exit.
     info "starting the cell: source=${SOURCE} seed=${SEED} rviz=${RVIZ} gz_gui=$([ "$HEADLESS" = false ] && echo on || echo off) ..."
+    # NB: NO --network host. gz-transport discovers the sim server<->spawner over
+    # UDP multicast; on the host's real interfaces that discovery fails, so the gz
+    # server never serves the world and the spawners loop forever at "Requesting
+    # list of world names" (no controllers -> no /joint_states -> the robot's
+    # moving frames link_1..6/tcp never connect to world, and the scene is static).
+    # An isolated container netns (the default bridge, like CI) makes discovery
+    # work on loopback. X11 to RViz goes over the mounted /tmp/.X11-unix socket,
+    # which needs no host networking; the HUD and fail-safe cue use `docker exec`.
     docker run -d --init --name "${CONTAINER}" \
         -e DISPLAY="${DISPLAY}" \
         -v /tmp/.X11-unix:/tmp/.X11-unix \
-        --network host \
         "${DRI_ARGS[@]}" \
         "${RUN_IMAGE}" \
         ros2 launch safecollab cell.launch.py \

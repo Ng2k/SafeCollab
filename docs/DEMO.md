@@ -154,10 +154,15 @@ docker build -t safecollab:dev .
 docker build -t safecollab:demo -f scripts/demo.Dockerfile --build-arg BASE=safecollab:dev .
 
 xhost +local:docker
-# Terminal 1 — the cell with GUI + RViz, perceived source:
+# Terminal 1 — the cell with RViz, perceived source.
+# NB: no --network host — gz-transport's sim-server<->spawner discovery fails on
+# the host's real interfaces (the spawners loop at "Requesting list of world
+# names" and nothing steps). The default (isolated) container network makes that
+# discovery work on loopback; X11 to RViz rides the /tmp/.X11-unix socket, which
+# needs no host networking.
 docker run --rm --init --name safecollab-demo \
     -e DISPLAY="${DISPLAY:-:0}" -v /tmp/.X11-unix:/tmp/.X11-unix \
-    --network host --device /dev/dri \
+    --device /dev/dri \
     safecollab:demo \
     ros2 launch safecollab cell.launch.py headless:=true rviz:=true safety_source:=perceived
     # (headless:=true keeps gz offscreen; RViz is the window. Use headless:=false
@@ -179,7 +184,7 @@ xhost -local:docker   # when done
 
 | Symptom | Likely cause / fix |
 |---------|--------------------|
-| Stuck at `Requesting list of world names` / nothing spawns / `cell is up` never prints | The gz GUI couldn't start and took the server down — you used `--gz-gui`. Drop it; the default (gz headless + RViz) is reliable. |
+| Stuck at `Requesting list of world names` / nothing spawns / `cell is up` never prints; RViz shows the static frames but the robot's `link_1..6`/`tcp` never connect to `world` and nothing moves | gz-transport's sim-server↔spawner discovery is failing. Two causes: (a) you ran the container with `--network host` — don't; the script uses the isolated default network so discovery works on loopback (this is the usual culprit for a *headless* hang); (b) you used `--gz-gui` and the gz GUI couldn't start under Wayland and took the server down — drop it (the default gz-headless + RViz is reliable). |
 | RViz window is black or GL errors | X/DRI passthrough isn't reaching the GPU. Confirm `/dev/dri` exists; `--no-rviz` falls back to HUD-only; software GL is slow — give it more start-up time. |
 | HUD shows `LOST` the whole time | Perception isn't detecting the operator (out of FOV, or GPU render too slow). Use `--source ground_truth` to demo the SSM behaviour without perception. |
 | `record-demo.sh failsafe` says "not running" | The `up` container isn't started, or it exited — check `docker logs safecollab-demo`. |
