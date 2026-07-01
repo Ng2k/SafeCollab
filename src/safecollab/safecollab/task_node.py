@@ -54,25 +54,32 @@ JOINT_NAMES: tuple[str, ...] = (
     "wrist_3_joint",
 )
 
-# Joint-space configurations for the kitting cell, FK-verified against the
+# Joint-space configurations for the kitting cell, IK-solved against the
 # arm.xacro chain (see module docstring).  Values: (pan, lift, elbow, wrist1,
 # wrist2, wrist3) in radians.
 # Geometric rationale:
 #   bin_left  is ~129° CCW from arm +x → shoulder_pan ≈ +2.25 rad
 #   bin_right is ~129° CW  from arm +x → shoulder_pan ≈ -2.25 rad
 #   kitting_tray is directly forward (+x) → shoulder_pan ≈ 0.0 rad
-#   lift/elbow/wrist solved so the TCP reaches the target at table height
-#   (*_pick / *_drop → z ≈ 0.80 m; *_above → z ≈ 1.00 m hover); the wrist points
-#   down into the tray/bin so tcp and link_6 are the lowest frames.
+#   lift/elbow/wrist_1 form a planar sub-chain (all about y) solved with a
+#   closed-form 2R + tool-down constraint on the SHORT wrist (l_4..l_6): the
+#   elbow-up branch reaches each TCP target with the tool pointing straight down,
+#   so from the elbow the chain descends monotonically in both height and radius
+#   to the target — a clean inverted-V reach, NOT the forearm folding back over
+#   the upper arm (the earlier long-link/long-wrist chain forced that fold).
+#   Targets: *_pick / *_drop → TCP z ≈ 0.80 m (table height); *_above → z ≈ 0.95 m
+#   hover; home → a compact hover (0.20, 0, 1.00) over the work area, tool down.
 #   All joint values are within the [-π, π] limits declared in arm.xacro.
+#   NOTE: these are solved for the l_2=l_3=0.25, wrist=0.16 m chain in arm.xacro —
+#   re-solve (see the IK in the arm.xacro link-length comment) if a length changes.
 _Q: dict[str, tuple[float, ...]] = {
-    "home": (0.0, -1.0, 1.5, -0.5, 0.0, 0.0),
-    "bin_left_above": (2.246, 0.443, 1.517, 1.857, 0.0, 0.0),
-    "bin_left_pick": (2.246, 0.793, 1.643, 1.459, 0.0, 0.0),
-    "bin_right_above": (-2.246, 0.443, 1.517, 1.857, 0.0, 0.0),
-    "bin_right_pick": (-2.246, 0.793, 1.643, 1.459, 0.0, 0.0),
-    "tray_above": (0.0, 0.121, 1.789, 0.973, 0.0, 0.0),
-    "tray_drop": (0.0, 0.471, 1.982, 0.522, 0.0, 0.0),
+    "home": (0.000, 0.245, 1.620, 1.277, 0.000, 0.000),
+    "bin_left_above": (2.246, 0.394, 1.636, 1.112, 0.000, 0.000),
+    "bin_left_pick": (2.246, 0.792, 1.744, 0.605, 0.000, 0.000),
+    "bin_right_above": (-2.246, 0.394, 1.636, 1.112, 0.000, 0.000),
+    "bin_right_pick": (-2.246, 0.792, 1.744, 0.605, 0.000, 0.000),
+    "tray_above": (0.000, 0.938, 0.745, 1.459, 0.000, 0.000),
+    "tray_drop": (0.000, 1.191, 0.893, 1.058, 0.000, 0.000),
 }
 
 # Nominal (full-speed) duration for each leg, in seconds.

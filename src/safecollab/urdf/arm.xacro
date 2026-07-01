@@ -42,14 +42,23 @@
        *origin: placement of base_link wrt parent -->
   <xacro:macro name="kitting_arm" params="parent *origin">
 
-    <!-- link lengths (m) -->
+    <!-- link lengths (m).
+         Proportioned to the cell: the pick/drop targets sit only ~0.32-0.46 m
+         from the shoulder at roughly shoulder height, so the upper arm + forearm
+         (l_2 + l_3) are kept short enough that reaching them needs only a modest
+         elbow bend (~100 deg at the bins) instead of folding the forearm back
+         over the upper arm. The wrist (l_4 + l_5 + l_6) is deliberately SHORT so
+         the tool sits just above the target when pointing straight down, rather
+         than forcing the whole arm up-and-over (which produced the earlier
+         "folds in itself" posture). Poses in task_node._Q are IK-solved for this
+         chain (elbow-up, tool-down); changing a length here means re-solving them. -->
     <xacro:property name="l_base"  value="0.10"/>
     <xacro:property name="l_1"     value="0.15"/>
-    <xacro:property name="l_2"     value="0.40"/>
-    <xacro:property name="l_3"     value="0.35"/>
-    <xacro:property name="l_4"     value="0.10"/>
-    <xacro:property name="l_5"     value="0.10"/>
-    <xacro:property name="l_6"     value="0.08"/>
+    <xacro:property name="l_2"     value="0.25"/>
+    <xacro:property name="l_3"     value="0.25"/>
+    <xacro:property name="l_4"     value="0.06"/>
+    <xacro:property name="l_5"     value="0.05"/>
+    <xacro:property name="l_6"     value="0.05"/>
 
     <!-- common revolute limits -->
     <xacro:property name="j_eff"   value="100.0"/>
