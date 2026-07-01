@@ -5,7 +5,7 @@
 # fill in as their nodes land:
 #
 #   * controllers active   -> `ros2 control list_controllers` (Stream A/D)
-#   * TF chain resolves     -> world->...->tcp and world->human_gt (Stream A/E)
+#   * TF chain resolves     -> world->...->tool0 and world->human_gt (Stream A/E)
 #   * topic rates           -> /safety/scale >= 20 Hz (Stream F)
 #   * command path re-timed -> /arm_controller/joint_trajectory (Stream D)
 #
@@ -285,15 +285,16 @@ class TestHeadlessBringup(unittest.TestCase):
         if not cell_present:
             self.skipTest("cell not built yet; TF chain check pending.")
 
-        # world -> tcp: published by robot_state_publisher from cell.xacro.
-        # Full chain: world -> table -> table_top -> base_link ->
-        #             link_1 -> link_2 -> link_3 -> link_4 -> link_5 ->
-        #             link_6 -> tcp (fixed joint at the tool centre point).
+        # world -> tool0: published by robot_state_publisher from cell.xacro.
+        # Full chain (UR5e, ur_description): world -> table -> table_top ->
+        #             base_link -> shoulder_link -> upper_arm_link ->
+        #             forearm_link -> wrist_1_link -> wrist_2_link ->
+        #             wrist_3_link -> flange -> tool0 (the tool centre point).
         # robot_state_publisher fills in all revolute joint states from
         # joint_state_broadcaster; all fixed joints are published at startup.
         self.assertTrue(
-            _tf_available("world", "tcp", timeout_s=10.0),
-            "TF world -> tcp not available within 10 s; "
+            _tf_available("world", "tool0", timeout_s=10.0),
+            "TF world -> tool0 not available within 10 s; "
             "check robot_state_publisher and joint_state_broadcaster.",
         )
 

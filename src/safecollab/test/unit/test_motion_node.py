@@ -18,7 +18,7 @@ Python class so all tests here run without a live ROS graph.
 
 import pytest
 
-from safecollab.motion_node import MotionLogic
+from safecollab.motion_node import MotionLogic, load_motion_config
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +229,69 @@ def test_resume_first_position_is_current_joint_state():
     ), "first waypoint must be the halted position, not nominal[0]"
 
 
+def test_current_state_realigned_to_trajectory_joint_order():
+    """Current joint state is permuted into the trajectory's joint order.
+
+    /joint_states is published ALPHABETICALLY (elbow, shoulder_lift,
+    shoulder_pan, …) while the planned trajectory uses ur_manipulator GROUP
+    order (shoulder_pan, shoulder_lift, elbow, …). If the current state were
+    spliced in raw, shoulder_pan and elbow would be swapped in the resume/hold
+    waypoint — the scramble that made the arm jerk and barely move. The state
+    must be realigned to the trajectory's joint names before use.
+    """
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(
+        ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint"],
+        [0.0, 1.0],
+        [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+    )
+    logic.set_scale(0.0)  # protective stop
+    # Halted state arrives in /joint_states (alphabetical) order with names.
+    logic.set_joint_positions(
+        [0.3, 0.2, 0.1],  # elbow=0.3, shoulder_lift=0.2, shoulder_pan=0.1
+        ["elbow_joint", "shoulder_lift_joint", "shoulder_pan_joint"],
+    )
+
+    logic.set_scale(1.0)  # resume
+    cmd = logic.compute_command(resuming=True)
+    assert cmd is not None
+    _, _, positions = cmd
+    # Waypoint 0 must be in trajectory order: [shoulder_pan, shoulder_lift, elbow].
+    assert positions[0] == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_hold_command_realigns_current_state_to_trajectory_order():
+    """The protective-hold waypoint is also expressed in trajectory joint order."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(
+        ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint"],
+        [0.0, 1.0],
+        [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+    )
+    logic.set_joint_positions(
+        [0.3, 0.2, 0.1],
+        ["elbow_joint", "shoulder_lift_joint", "shoulder_pan_joint"],
+    )
+    cmd = logic.command_for_scale(0.0)  # protective stop => hold
+    assert cmd is not None
+    kind, _, _, positions = cmd
+    assert kind == "hold"
+    assert positions[0] == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_current_state_without_names_used_as_is():
+    """When names are omitted the state is used verbatim (historical behaviour)."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1", "j2"], [0.0, 1.0], [[0.0, 0.0], [1.0, 1.0]])
+    logic.set_scale(0.0)
+    logic.set_joint_positions([0.5, 0.7])  # no names
+    logic.set_scale(1.0)
+    cmd = logic.compute_command(resuming=True)
+    assert cmd is not None
+    _, _, positions = cmd
+    assert positions[0] == pytest.approx([0.5, 0.7])
+
+
 def test_resume_first_time_is_zero():
     """On resume, times[0] must be 0.0 (the new trajectory starts now)."""
     logic = MotionLogic()
@@ -316,8 +379,8 @@ def test_resume_without_joint_positions_falls_back_to_nominal():
 def test_resume_mid_leg_does_not_backtrack_to_leg_start():
     """A stop part-way through a [start, end] leg resumes straight on to end.
 
-    task_node publishes each leg as a 2-waypoint trajectory [leg_start, leg_end].
-    If the robot is halted between them, resume must NOT re-insert leg_start —
+    This exercises the resume path with a minimal 2-waypoint leg [leg_start,
+    leg_end]. If the robot is halted between them, resume must NOT re-insert leg_start —
     that would drive the arm backward then forward again (a jerk, and motion the
     operator would not expect in a shared workspace). The resumed trajectory is
     [current, leg_end] only.
@@ -398,7 +461,7 @@ def test_scenario_trajectory_then_stop_then_resume():
     """
     logic = MotionLogic()
 
-    # Step 1: task_node publishes nominal trajectory (/motion/nominal_trajectory)
+    # Step 1: planner_node publishes nominal trajectory (/motion/nominal_trajectory)
     logic.set_nominal_trajectory(
         ["j1", "j2"],
         [0.0, 1.0, 2.0],
@@ -494,3 +557,187 @@ def test_resume_empty_times_trajectory():
     _, times, positions = cmd
     assert times[0] == pytest.approx(0.0)
     assert positions[0] == pytest.approx([0.5])
+
+
+# ---------------------------------------------------------------------------
+# Dead-band + active-hold orchestration (P5 demo fix)
+#
+# safety_monitor publishes /safety/scale at a fixed 20 Hz even when the value is
+# unchanged. command_for_scale() is the single entry the ROS scale callback uses:
+# it dedups unchanged ticks (so the joint_trajectory_controller is not re-commanded
+# ~20x/s, which reset its clock and produced the erratic "random swinging"), and it
+# turns a protective stop (scale==0) into an ACTIVE hold at the current joint state
+# (joint_trajectory_controller does not stop on silence — it finishes its last goal).
+# ---------------------------------------------------------------------------
+
+
+def _running_logic() -> MotionLogic:
+    """A MotionLogic with a 2-waypoint leg, a known joint state, running (scale 1)."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1", "j2"], [0.0, 1.0], [[0.0, 0.0], [1.0, 1.0]])
+    logic.set_joint_positions([0.3, 0.3])
+    return logic
+
+
+def test_command_for_scale_first_call_issues_move():
+    """The first scale after start-up issues a move command."""
+    logic = _running_logic()
+    cmd = logic.command_for_scale(1.0)
+    assert cmd is not None
+    assert cmd[0] == "move"
+
+
+def test_command_for_scale_dedups_identical_scale():
+    """An unchanged scale tick issues nothing (no 20 Hz re-command spam)."""
+    logic = _running_logic()
+    assert logic.command_for_scale(1.0) is not None
+    assert logic.command_for_scale(1.0) is None
+
+
+def test_command_for_scale_dedups_subthreshold_change():
+    """A scale change below the dead-band is ignored."""
+    logic = _running_logic()
+    logic.command_for_scale(0.5)
+    assert logic.command_for_scale(0.51) is None  # 0.01 < epsilon (0.02)
+
+
+def test_command_for_scale_reissues_on_material_change():
+    """A scale change above the dead-band re-issues a move command."""
+    logic = _running_logic()
+    logic.command_for_scale(0.5)
+    cmd = logic.command_for_scale(0.8)
+    assert cmd is not None and cmd[0] == "move"
+
+
+def test_command_for_scale_stop_issues_hold_at_current_state():
+    """scale==0 issues a single-point HOLD at the current joint state."""
+    logic = _running_logic()
+    logic.command_for_scale(1.0)
+    cmd = logic.command_for_scale(0.0)
+    assert cmd is not None
+    kind, names, times, positions = cmd
+    assert kind == "hold"
+    assert names == ["j1", "j2"]
+    assert positions == [[0.3, 0.3]]  # holds where the arm is, not the leg end
+    assert len(positions) == 1 and times[0] > 0.0  # a short, positive hold horizon
+
+
+def test_command_for_scale_stop_dedups_after_first_hold():
+    """Repeated scale==0 ticks do not re-issue the hold every tick."""
+    logic = _running_logic()
+    logic.command_for_scale(1.0)
+    assert logic.command_for_scale(0.0) is not None  # first stop -> hold
+    assert logic.command_for_scale(0.0) is None  # already holding
+
+
+def test_command_for_scale_stop_without_joint_state_sends_nothing():
+    """Cannot hold an unknown joint state -> command nothing (no crash)."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1"], [0.0, 1.0], [[0.0], [1.0]])
+    logic.command_for_scale(1.0)  # no set_joint_positions
+    assert logic.command_for_scale(0.0) is None
+
+
+def test_command_for_scale_resume_moves_from_current_state():
+    """Resume (0 -> >0) issues a move that starts at the current joint state."""
+    logic = _running_logic()
+    logic.command_for_scale(1.0)
+    logic.command_for_scale(0.0)
+    logic.set_joint_positions([0.6, 0.6])  # halted here
+    cmd = logic.command_for_scale(1.0)  # resume
+    assert cmd is not None
+    kind, _, _, positions = cmd
+    assert kind == "move"
+    assert positions[0] == pytest.approx([0.6, 0.6])
+
+
+def test_command_for_scale_midleg_change_does_not_backtrack():
+    """A mid-leg slow-down re-plans from the current state, never back to leg start."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1"], [0.0, 1.0], [[0.0], [2.0]])
+    logic.command_for_scale(1.0)
+    logic.set_joint_positions([1.2])  # moved well into the leg
+    cmd = logic.command_for_scale(0.5)  # material slow-down mid-leg
+    assert cmd is not None
+    _, _, _, positions = cmd
+    assert positions[0] == pytest.approx([1.2])  # anchored at current state
+    assert [0.0] not in positions  # leg start is not re-commanded
+
+
+def test_command_for_new_leg_issues_move_when_running():
+    """A fresh nominal leg while running issues a move command."""
+    logic = MotionLogic()
+    logic.set_scale(1.0)
+    logic.set_nominal_trajectory(["j1"], [0.0, 1.0], [[0.0], [1.0]])
+    logic.set_joint_positions([0.0])
+    cmd = logic.command_for_new_leg()
+    assert cmd is not None and cmd[0] == "move"
+
+
+def test_command_for_new_leg_holds_when_stopped():
+    """A fresh nominal leg while STOPPED keeps holding — it does not start moving."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1"], [0.0, 1.0], [[0.0], [1.0]])
+    logic.set_joint_positions([0.4])
+    logic.command_for_scale(1.0)
+    logic.command_for_scale(0.0)  # protective stop in effect
+    cmd = logic.command_for_new_leg()  # planner_node advances a leg during the stop
+    assert cmd is not None and cmd[0] == "hold"
+    assert cmd[3] == [[0.4]]  # keep holding current state, not the new leg
+
+
+def test_command_for_new_leg_sets_dedup_baseline():
+    """After a new leg is issued at scale 1.0, an identical scale tick dedups."""
+    logic = MotionLogic()
+    logic.set_nominal_trajectory(["j1"], [0.0, 1.0], [[0.0], [1.0]])
+    logic.set_joint_positions([0.0])
+    logic.set_scale(1.0)
+    logic.command_for_new_leg()
+    assert logic.command_for_scale(1.0) is None
+
+
+def test_command_for_new_leg_without_trajectory_returns_none():
+    """No nominal trajectory yet -> nothing to command."""
+    logic = MotionLogic()
+    logic.set_scale(1.0)
+    assert logic.command_for_new_leg() is None
+
+
+def test_command_for_scale_without_trajectory_returns_none():
+    """A running scale with no nominal leg yet commands nothing (no crash)."""
+    logic = MotionLogic()
+    logic.set_joint_positions([0.0])
+    assert logic.command_for_scale(1.0) is None
+
+
+# ---------------------------------------------------------------------------
+# Config loader (ground rule 5: knobs live in config/motion.yaml)
+# ---------------------------------------------------------------------------
+
+
+def test_load_motion_config_reads_knobs(tmp_path):
+    """load_motion_config reads the republish dead-band and hold horizon."""
+    p = tmp_path / "motion.yaml"
+    p.write_text("motion:\n  republish_scale_epsilon: 0.05\n  hold_time_s: 0.5\n")
+    cfg = load_motion_config(p)
+    assert cfg.republish_scale_epsilon == pytest.approx(0.05)
+    assert cfg.hold_time_s == pytest.approx(0.5)
+
+
+def test_load_motion_config_defaults_when_missing(tmp_path):
+    """Missing keys fall back to sane defaults (no crash on a partial file)."""
+    p = tmp_path / "motion.yaml"
+    p.write_text("motion: {}\n")
+    cfg = load_motion_config(p)
+    assert cfg.republish_scale_epsilon > 0.0
+    assert cfg.hold_time_s > 0.0
+
+
+def test_motion_logic_honours_configured_epsilon():
+    """A larger configured dead-band widens what counts as 'unchanged'."""
+    logic = MotionLogic(republish_scale_epsilon=0.2, hold_time_s=0.2)
+    logic.set_nominal_trajectory(["j1"], [0.0, 1.0], [[0.0], [1.0]])
+    logic.set_joint_positions([0.0])
+    logic.command_for_scale(0.5)
+    assert logic.command_for_scale(0.6) is None  # 0.1 < 0.2 -> deduped
+    assert logic.command_for_scale(0.75) is not None  # 0.25 >= 0.2 -> re-issued

@@ -7,11 +7,14 @@
        * two feeder bins (pick locations)
        * one shared kitting tray (drop location, co-occupied with the operator)
        * a down-looking camera sensor publishing on /camera/image (for Stream C)
-       * the 6-DOF arm (from arm.xacro) mounted on the table
+       * the 6-DOF Universal Robots UR5e (ur_description macro) mounted on the table
        * the gz_ros2_control::GazeboSimROS2ControlPlugin loading controllers.yaml -->
 <robot name="safecollab_cell" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-  <xacro:include filename="$(find safecollab)/urdf/arm.xacro"/>
+  <!-- Universal Robots UR5e: real model + solved kinematics from ur_description;
+       ur_simulation_gz supplies the gz_ros2_control wiring (ur_ros2_control macro). -->
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find ur_simulation_gz)/urdf/ur_gz.ros2_control.xacro"/>
 
   <!-- ================= materials ================= -->
   <material name="table_mat"><color rgba="0.6 0.45 0.3 1.0"/></material>
@@ -42,7 +45,13 @@
   <!-- geometry constants -->
   <xacro:property name="table_h"  value="0.74"/>   <!-- table top height above floor -->
   <xacro:property name="table_sx" value="1.20"/>
-  <xacro:property name="table_sy" value="0.80"/>
+  <!-- table depth (y): widened from 0.80 so the two feeder bins sit on the
+       robot's LEFT/RIGHT flanks at a natural UR5e reach radius (~0.41 m from
+       the base) instead of tucked in behind/under the base. The old bins at
+       base-rel (-0.20, ±0.25) forced a folded back-over-the-shoulder reach —
+       the arm looked like it "stopped short" of the box. Side bins give a clean
+       elbow-up side pick and keep bin work lateral (clear of the front operator). -->
+  <xacro:property name="table_sy" value="1.05"/>
 
   <!-- ================= world ================= -->
   <link name="world"/>
@@ -66,18 +75,26 @@
   </joint>
 
   <!-- ================= feeder bins (pick) ================= -->
+  <!-- Bins flank the base FORWARD-of-centre at world (0.15, ±0.35):
+       base-rel (0.25, ±0.35), radius ≈ 0.43 m. The forward offset is key:
+       bins on the pure-side line (base-rel x ≈ 0) sit near the UR5e SHOULDER
+       SINGULARITY (wrist centre over the shoulder axis), where the +y reach
+       becomes an awkward near-singular config the arm can't cleanly complete —
+       so one bin was reachable and the mirrored one was not. Pushing the bins
+       forward moves both off that singular line into a well-conditioned
+       front-side reach. planner_node's bin targets mirror these coordinates. -->
   <xacro:box_link name="bin_left"  sx="0.15" sy="0.15" sz="0.08" mass="0.5" material="bin_mat"/>
   <joint name="top_to_bin_left" type="fixed">
     <parent link="table_top"/>
     <child  link="bin_left"/>
-    <origin xyz="-0.30 0.25 0.04" rpy="0 0 0"/>
+    <origin xyz="0.15 0.35 0.04" rpy="0 0 0"/>
   </joint>
 
   <xacro:box_link name="bin_right" sx="0.15" sy="0.15" sz="0.08" mass="0.5" material="bin_mat"/>
   <joint name="top_to_bin_right" type="fixed">
     <parent link="table_top"/>
     <child  link="bin_right"/>
-    <origin xyz="-0.30 -0.25 0.04" rpy="0 0 0"/>
+    <origin xyz="0.15 -0.35 0.04" rpy="0 0 0"/>
   </joint>
 
   <!-- ================= shared kitting tray (drop) ================= -->
@@ -89,10 +106,26 @@
     <origin xyz="0.35 0.0 0.02" rpy="0 0 0"/>
   </joint>
 
-  <!-- ================= the arm (mounted on the table top, centred at the back) ================= -->
-  <xacro:kitting_arm parent="table_top">
+  <!-- ================= the arm: Universal Robots UR5e ================= -->
+  <!-- Mounted on the table top toward the back. UR joint names already match
+       config/controllers.yaml, so the arm_controller + joint_state_broadcaster
+       wiring is unchanged. force_abs_paths=true so gz (and RViz) resolve the UR
+       meshes by absolute path. The gz_ros2_control PLUGIN is declared once below
+       (shared with nothing else); ur_ros2_control adds the <ros2_control> system
+       block with position/velocity/effort interfaces on the six joints. -->
+  <xacro:property name="ur_cfg" value="$(find ur_description)/config/ur5e"/>
+  <xacro:ur_robot
+      name="ur5e"
+      tf_prefix=""
+      parent="table_top"
+      joint_limits_parameters_file="${ur_cfg}/joint_limits.yaml"
+      kinematics_parameters_file="${ur_cfg}/default_kinematics.yaml"
+      physical_parameters_file="${ur_cfg}/physical_parameters.yaml"
+      visual_parameters_file="${ur_cfg}/visual_parameters.yaml"
+      force_abs_paths="true">
     <origin xyz="-0.10 0.0 0.0" rpy="0 0 0"/>
-  </xacro:kitting_arm>
+  </xacro:ur_robot>
+  <xacro:ur_ros2_control name="ur5e" tf_prefix=""/>
 
   <!-- ================= camera sensor (Stream C) ================= -->
   <!-- Mast rising from the table to hold the overhead camera. It is tall

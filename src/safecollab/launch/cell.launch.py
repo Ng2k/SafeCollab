@@ -10,7 +10,7 @@
 #   4. joint_state_broadcaster + arm_controller spawners — ordered via OnProcessExit (Stream A)
 #   5. ros_gz_image bridge — gz camera/image -> ROS /camera/image (Stream C input)
 #   6. ros_gz_bridge       — gz clock -> ROS /clock (sim time for every node)
-#   7. task_node         — kitting state machine + nominal trajectory publisher (Stream E)
+#   7. planner_node      — MoveIt/Pilz pick-and-place; nominal trajectory publisher (Stream D')
 #   8. human_node        — ground-truth operator model, broadcasts world->human_gt TF (Stream E)
 #   9. motion_node       — fuses nominal trajectory * safety scale, commands arm (Stream D)
 #  10. perception_node   — camera -> perceived world->human TF + /human/uncertainty (Stream C)
@@ -26,10 +26,10 @@
 #
 # Quick introspection after launch:
 #   ros2 control list_controllers          # joint_state_broadcaster + arm_controller active
-#   ros2 run tf2_tools view_frames         # world->tcp chain and world->human_gt
+#   ros2 run tf2_tools view_frames         # world->tool0 chain and world->human_gt
 #   ros2 topic hz /camera/image            # ~30 Hz from the gz camera bridge
 #   ros2 topic echo /task/state            # kitting SM state
-#   ros2 topic echo /motion/nominal_trajectory  # trajectory from task_node
+#   ros2 topic echo /motion/nominal_trajectory  # trajectory from planner_node
 #
 # Reference: _stream_a_smoke_test.launch.py was the provisional scaffold this file replaces.
 # It is kept for Stream A's own smoke-test verification and is not run by CI.
@@ -52,6 +52,50 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
+
+
+def _moveit_params() -> dict:
+    """Assemble the MoveIt config for planner_node's MoveItPy (Pilz pick-and-place).
+
+    Built here (not inside the node) so the nested planning-pipeline parameters are
+    declared as ROS node parameters — the only reliable way to get MoveItCpp to
+    load the Pilz planner. Returns the flat param dict merged onto planner_node.
+    """
+    import os
+
+    from ament_index_python.packages import get_package_share_directory
+    from moveit_configs_utils import MoveItConfigsBuilder
+
+    share = get_package_share_directory("safecollab")
+    cfg = (
+        MoveItConfigsBuilder("safecollab_cell", package_name="safecollab")
+        .robot_description(file_path=os.path.join(share, "urdf", "cell.xacro"))
+        .robot_description_semantic(
+            file_path=os.path.join(share, "srdf", "cell.srdf.xacro")
+        )
+        .robot_description_kinematics(
+            file_path=os.path.join(share, "config", "kinematics.yaml")
+        )
+        .joint_limits(file_path=os.path.join(share, "config", "joint_limits.yaml"))
+        .pilz_cartesian_limits(
+            file_path=os.path.join(share, "config", "pilz_cartesian_limits.yaml")
+        )
+        .planning_pipelines(
+            pipelines=["pilz_industrial_motion_planner"],
+            default_planning_pipeline="pilz_industrial_motion_planner",
+        )
+        .to_moveit_configs()
+    )
+    params = cfg.to_dict()
+    # to_dict() emits planning_pipelines as a FLAT list (what the move_group node
+    # reads), but MoveItCpp — which MoveItPy uses — reads planning_pipelines.
+    # pipeline_names. Reshape so the Pilz pipeline actually loads.
+    names = params.pop("planning_pipelines")
+    params["planning_pipelines"] = {
+        "pipeline_names": names,
+        "default_planning_pipeline": params.get("default_planning_pipeline", names[0]),
+    }
+    return params
 
 
 def generate_launch_description():
@@ -93,6 +137,30 @@ def generate_launch_description():
         ),
     )
     path_seed = LaunchConfiguration("path_seed")
+
+    rviz_arg = DeclareLaunchArgument(
+        "rviz",
+        default_value="false",
+        description=(
+            "Launch RViz with config/view.rviz to visualise the cell: robot model, "
+            "camera image, and the /viz/safety_marker zone sphere + text label "
+            "(P5). Default false so CI/headless and the scenario harness are "
+            "unaffected. Example: ros2 launch safecollab cell.launch.py rviz:=true"
+        ),
+    )
+    rviz = LaunchConfiguration("rviz")
+
+    hud_arg = DeclareLaunchArgument(
+        "hud",
+        default_value="false",
+        description=(
+            "Launch the console safety HUD (hud_node): a compact, colour-coded "
+            "terminal readout of zone / speed scale / min-distance (P5). Default "
+            "false so CI/headless and the scenario harness are unaffected. "
+            "Example: ros2 launch safecollab cell.launch.py hud:=true"
+        ),
+    )
+    hud = LaunchConfiguration("hud")
 
     # ------------------------------------------------------------------
     # Gazebo simulation — §6 item 1 prerequisite
@@ -274,13 +342,17 @@ def generate_launch_description():
     # NOT silently broken references (per §6 ownership note).
     # ------------------------------------------------------------------
 
-    # Stream E: task_node — owns the kitting state machine (GO_TO_BIN -> PICK -> ...),
-    # publishes /motion/nominal_trajectory (JointTrajectory) and /task/state (String).
-    task_node = Node(
+    # Stream D': planner_node — MoveIt/Pilz pick-and-place planner for the UR5e.
+    # Resolves each Cartesian tool target to a joint config once (deterministic,
+    # FK-verified IK), plans the kitting cycle as Pilz PTP segments, and publishes
+    # each as /motion/nominal_trajectory (dense position JointTrajectory) plus
+    # /task/state (String). motion_node retimes it for SSM speed scaling.
+    planner_node = Node(
         package="safecollab",
-        executable="task_node",
+        executable="planner_node",
+        name="planner_node",
         output="screen",
-        parameters=[{"use_sim_time": True}],
+        parameters=[_moveit_params(), {"use_sim_time": True}],
     )
 
     # Stream E: human_node — drives the simulated operator along randomisable paths
@@ -327,7 +399,7 @@ def generate_launch_description():
     # ------------------------------------------------------------------
     # Stream F: safety_monitor — closes the loop. Reads the perceived world->human
     # TF + /human/uncertainty (σ), sweeps min separation over robot frames
-    # (tcp, link_6, link_3 — see config/safety.yaml), calls safety_logic.classify()
+    # (tool0, wrist_3_link, forearm_link — see config/safety.yaml), calls classify()
     # and publishes /safety/scale (Float32 0..1) + /safety/zone (green|yellow|red|
     # lost). Fail-safe: stale/absent human TF -> ("lost", 0.0) protective stop.
     # ------------------------------------------------------------------
@@ -339,11 +411,44 @@ def generate_launch_description():
         parameters=[{"use_sim_time": True, "safety_source": safety_source}],
     )
 
+    # ------------------------------------------------------------------
+    # P5: RViz — only when rviz:=true (default false keeps CI/headless clean).
+    # Loads config/view.rviz (RobotModel + Camera + safety-zone Marker display)
+    # so the green/yellow/red/lost state is legible at a glance.
+    # ------------------------------------------------------------------
+
+    rviz_config = PathJoinSubstitution([pkg, "config", "view.rviz"])
+
+    rviz_node = Node(
+        package="rviz2",
+        executable="rviz2",
+        arguments=["-d", rviz_config],
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+        condition=IfCondition(rviz),
+    )
+
+    # ------------------------------------------------------------------
+    # P5: console safety HUD — only when hud:=true (default false). A view-only
+    # node printing the live zone / scale / min-distance one-liner to the
+    # terminal for the 5-second legibility check and the demo capture.
+    # ------------------------------------------------------------------
+
+    hud_node = Node(
+        package="safecollab",
+        executable="hud_node",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+        condition=IfCondition(hud),
+    )
+
     return LaunchDescription(
         [
             headless_arg,
             safety_source_arg,
             path_seed_arg,
+            rviz_arg,
+            hud_arg,
             # gz sim: exactly one of these two runs depending on headless argument
             gz_server,  # headless=true  -> server-only (CI / no display)
             gz_full,  # headless=false -> server + GUI (interactive)
@@ -366,11 +471,14 @@ def generate_launch_description():
             ),
             camera_bridge,
             # --- application nodes ---
-            task_node,
+            planner_node,
             human_node,
             motion_node,
             # --- safety loop: perception -> safety_monitor -> motion scale ---
             perception_node,  # Stream C
             safety_monitor,  # Stream F
+            # --- P5 visualisation (only when rviz:=true / hud:=true) ---
+            rviz_node,
+            hud_node,
         ]
     )

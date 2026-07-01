@@ -1,0 +1,19 @@
+# Pilz industrial motion planner pipeline (deterministic PTP/LIN), from
+# ur_moveit_config. PTP = point-to-point joint motion (transits); LIN = straight
+# Cartesian motion (bin/tray approach + retreat). Deterministic and repeatable,
+# so the demo motion is stable and the resulting trajectory retimes cleanly for
+# the SSM speed-scaling in motion_node.
+planning_plugins:
+  - pilz_industrial_motion_planner/CommandPlanner
+default_planner_config: PTP
+request_adapters:
+  - default_planning_request_adapters/ResolveConstraintFrames
+  - default_planning_request_adapters/ValidateWorkspaceBounds
+  - default_planning_request_adapters/CheckStartStateBounds
+  - default_planning_request_adapters/CheckStartStateCollision
+response_adapters:
+  - default_planning_response_adapters/ValidateSolution
+  - default_planning_response_adapters/DisplayMotionPath
+capabilities: >-
+    pilz_industrial_motion_planner/MoveGroupSequenceAction
+    pilz_industrial_motion_planner/MoveGroupSequenceService

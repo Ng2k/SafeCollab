@@ -13,7 +13,7 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         # urdf/xacro files -- required so FindPackageShare('safecollab') resolves
-        # cell.xacro / arm.xacro after `colcon build`
+        # cell.xacro (which pulls in the UR5e macro) after `colcon build`
         # urdf/*.sdf  -- operator.sdf (yellow visual body) must also be installed
         # so that cell.launch.py's `ros_gz_sim create -file` can resolve the path
         # via FindPackageShare('safecollab')/urdf/operator.sdf after colcon build.
@@ -25,6 +25,13 @@ setup(
         (
             os.path.join("share", package_name, "config"),
             glob("config/*.yaml") + glob("config/*.rviz"),
+        ),
+        # SRDF (MoveIt semantic model of the cell) -- read by planner_node's
+        # MoveItConfigsBuilder from the installed share (kinematics/pilz/joint-limit
+        # yamls live in config/ above so MoveItConfigsBuilder's defaults find them).
+        (
+            os.path.join("share", package_name, "srdf"),
+            glob("srdf/*.xacro"),
         ),
         # launch files -- required so FindPackageShare('safecollab') resolves them
         # after `colcon build`.
@@ -45,11 +52,12 @@ setup(
     tests_require=["pytest", "pytest-cov"],
     entry_points={
         "console_scripts": [
-            "task_node = safecollab.task_node:main",
+            "planner_node = safecollab.planner_node:main",
             "human_node = safecollab.human_node:main",
             "perception_node = safecollab.perception_node:main",
             "safety_monitor = safecollab.safety_monitor:main",
             "motion_node = safecollab.motion_node:main",
+            "hud_node = safecollab.hud_node:main",
         ],
     },
 )

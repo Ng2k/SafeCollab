@@ -1,0 +1,9 @@
+# MoveIt kinematics solver for the UR5e planning group (from ur_moveit_config).
+ur_manipulator:
+  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  # KDL is a numerical solver (no analytic UR IK plugin is packaged); a longer
+  # timeout lets its random restarts find solutions for the forward tool-down
+  # poses that a 5 ms budget missed.
+  kinematics_solver_timeout: 0.05
+  kinematics_solver_attempts: 5

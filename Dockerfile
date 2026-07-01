@@ -55,6 +55,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-gz-transport13 \
         python3-gz-msgs10 \
     && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Universal Robots UR5e model + gz simulation wiring (real manipulator, replaces
+# the hand-built cylinder arm). ur_description provides the URDF/meshes and solved
+# kinematics; ur_simulation_gz wires the UR into gz via gz_ros2_control (the same
+# mechanism this cell already uses) — its ur_gz.ros2_control.xacro is included by
+# cell.xacro. Joint names (shoulder_pan_joint … wrist_3_joint) already match
+# config/controllers.yaml and the motion pipeline, so the SSM loop is unchanged.
+# (MoveIt planning packages are added in a later layer.)
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-jazzy-ur-description \
+        ros-jazzy-ur-simulation-gz \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# MoveIt 2 + the deterministic Pilz industrial motion planner + moveit_py, plus
+# the UR MoveIt config (SRDF/kinematics/limits reused for our cell). planner_node
+# uses MoveItPy + Pilz (PTP/LIN) to generate the nominal kitting trajectory that
+# motion_node then retimes for SSM speed scaling. Kept in a separate layer (large)
+# so the UR layer above stays cached across rebuilds.
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-jazzy-moveit \
+        ros-jazzy-moveit-py \
+        ros-jazzy-pilz-industrial-motion-planner \
+        ros-jazzy-ur-moveit-config \
+    && rm -rf /var/lib/apt/lists/*
 # python3-gz-transport13 / python3-gz-msgs10 (from the OSRF repo added above)
 # give human_node._set_gz_pose() the gz.transport13 / gz.msgs10 modules it needs
 # to move the yellow operator body via /world/empty/set_pose, so the overhead

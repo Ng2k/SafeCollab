@@ -23,7 +23,35 @@ Stop/resume contract (AGENTS.md §4, §6):
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import yaml
+
 from safecollab.retime import retime
+
+# Defaults mirror config/motion.yaml so MotionLogic is usable (and unit-testable)
+# without a config file; the ROS node overrides them from the YAML (ground rule 5).
+_DEFAULT_REPUBLISH_EPSILON = 0.02
+_DEFAULT_HOLD_TIME_S = 0.2
+
+
+def load_motion_config(path) -> SimpleNamespace:
+    """Load the ``motion:`` block of ``config/motion.yaml`` into a namespace.
+
+    Missing keys fall back to the module defaults so a partial file never crashes
+    the node. Returns a namespace with ``republish_scale_epsilon`` and
+    ``hold_time_s`` attributes.
+    """
+    with open(path) as handle:
+        data = yaml.safe_load(handle) or {}
+    motion = data.get("motion") or {}
+    return SimpleNamespace(
+        republish_scale_epsilon=float(
+            motion.get("republish_scale_epsilon", _DEFAULT_REPUBLISH_EPSILON)
+        ),
+        hold_time_s=float(motion.get("hold_time_s", _DEFAULT_HOLD_TIME_S)),
+    )
+
 
 # ROS 2 is not available in the pure-Python unit-test environment (see
 # requirements.txt — rclpy is an apt package, not a pip package).
@@ -76,12 +104,33 @@ class MotionLogic:
             self._publish(*cmd)
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        republish_scale_epsilon: float = _DEFAULT_REPUBLISH_EPSILON,
+        hold_time_s: float = _DEFAULT_HOLD_TIME_S,
+    ) -> None:
         self._scale: float = 1.0
         # (joint_names, times, positions) — None until a trajectory arrives.
         self._nominal: tuple[list[str], list[float], list[list[float]]] | None = None
         self._joint_positions: list[float] | None = None
+        # Joint names for _joint_positions, as published on /joint_states. The
+        # broadcaster orders them ALPHABETICALLY (elbow, shoulder_lift,
+        # shoulder_pan, …) while the planner's trajectory uses the ur_manipulator
+        # GROUP order (shoulder_pan, shoulder_lift, elbow, …). Keeping the names
+        # lets us realign the current state to the trajectory order before using
+        # it as a waypoint — otherwise the resume/hold waypoint would be scrambled
+        # (shoulder_pan ↔ elbow swapped), producing erratic, barely-moving motion.
+        self._joint_names: list[str] | None = None
         self._stopped: bool = False
+        # Stop/resume edge flags, refreshed by every set_scale (see command_for_scale).
+        self._just_stopped: bool = False
+        self._just_resumed: bool = False
+        # The scale at which we last actually issued a command; None until the
+        # first command. Drives the dead-band so unchanged 20 Hz ticks are dropped.
+        self._last_cmd_scale: float | None = None
+        self._republish_epsilon: float = republish_scale_epsilon
+        self._hold_time_s: float = hold_time_s
 
     # ------------------------------------------------------------------
     # State updates (called from ROS callbacks or from tests directly)
@@ -104,7 +153,9 @@ class MotionLogic:
         was_stopped = self._stopped
         self._scale = scale
         self._stopped = scale == 0.0
-        return was_stopped and not self._stopped  # True only on resume
+        self._just_stopped = (not was_stopped) and self._stopped
+        self._just_resumed = was_stopped and not self._stopped
+        return self._just_resumed  # True only on resume
 
     def set_nominal_trajectory(
         self,
@@ -118,13 +169,43 @@ class MotionLogic:
         """
         self._nominal = (list(joint_names), list(times), list(positions))
 
-    def set_joint_positions(self, positions: list[float]) -> None:
+    def set_joint_positions(
+        self, positions: list[float], names: list[str] | None = None
+    ) -> None:
         """Update current joint positions (e.g. from /joint_states).
 
-        Used only on the resume path to seed the first waypoint of the
-        freshly-built trajectory.
+        Used on the resume/hold path to seed the first waypoint of the
+        freshly-built trajectory. ``names`` (the /joint_states name array) is
+        stored so the state can be realigned to the trajectory's joint order in
+        :meth:`_current_in_nominal_order`; when omitted the positions are used
+        as-is (the historical behaviour the unit tests rely on).
         """
         self._joint_positions = list(positions)
+        self._joint_names = list(names) if names is not None else None
+
+    def _current_in_nominal_order(self) -> list[float] | None:
+        """Current joint positions reordered to the nominal trajectory's joints.
+
+        ``/joint_states`` and the planned trajectory can list the joints in
+        different orders (alphabetical vs. group order). Any waypoint built from
+        the current state must be expressed in the SAME order as the trajectory
+        it is spliced into, or the controller applies each value to the wrong
+        joint. Returns the positions permuted into ``self._nominal``'s joint
+        order; falls back to the raw list when names are unknown, the orders
+        already match, or a name cannot be mapped (best effort, never crashes).
+        """
+        if self._joint_positions is None:
+            return None
+        if self._joint_names is None or self._nominal is None:
+            return self._joint_positions
+        nominal_names = self._nominal[0]
+        if self._joint_names == nominal_names:
+            return self._joint_positions
+        lut = dict(zip(self._joint_names, self._joint_positions))
+        try:
+            return [lut[name] for name in nominal_names]
+        except KeyError:
+            return self._joint_positions
 
     # ------------------------------------------------------------------
     # Command computation
@@ -151,8 +232,9 @@ class MotionLogic:
             return None
 
         joint_names, times, positions = self._nominal
+        current = self._current_in_nominal_order()
 
-        if resuming and self._joint_positions is not None and positions:
+        if resuming and current is not None and positions:
             # Build a fresh trajectory starting from the current robot state.
             #
             # Prepend the halted position as waypoint 0 at t=0, then continue with
@@ -176,9 +258,9 @@ class MotionLogic:
             else:
                 dt = 1.0
 
-            ahead = self._ahead_positions(self._joint_positions, positions)
+            ahead = self._ahead_positions(current, positions)
             times_to_use = [0.0] + [(i + 1) * dt for i in range(len(ahead))]
-            positions_to_use = [self._joint_positions] + ahead
+            positions_to_use = [current] + ahead
         else:
             times_to_use = times
             positions_to_use = positions
@@ -189,6 +271,98 @@ class MotionLogic:
             return None
 
         return (joint_names, new_times, positions_to_use)
+
+    # ------------------------------------------------------------------
+    # Command orchestration (what the ROS callbacks actually call)
+    # ------------------------------------------------------------------
+
+    def command_for_scale(
+        self, scale: float
+    ) -> tuple[str, list[str], list[float], list[list[float]]] | None:
+        """Decide what to command in response to a new ``/safety/scale``.
+
+        This is the single entry the node's scale callback uses. It applies the
+        dead-band (``config/motion.yaml``) so that the ~20 Hz stream of *unchanged*
+        scale values does not re-command the controller on every tick (which resets
+        the trajectory clock and produces the erratic motion seen in the demo), and
+        it turns a protective stop into an ACTIVE hold at the current joint state.
+
+        Returns:
+            ``(kind, joint_names, times, positions)`` where *kind* is:
+              * ``"move"`` — a re-timed trajectory to the leg goal, anchored at the
+                current joint state (no backtrack), or
+              * ``"hold"`` — a single-point trajectory pinning the current joint
+                state (protective stop).
+            or ``None`` when nothing new should be sent (scale materially unchanged,
+            or a stop with no known joint state to hold).
+
+        Raises:
+            ValueError: if *scale* is outside [0.0, 1.0] (via :meth:`set_scale`).
+        """
+        self.set_scale(scale)
+        if not self._is_material_change(scale):
+            return None
+        if self._stopped:
+            return self._hold_command()
+        cmd = self.compute_command(resuming=True)
+        if cmd is None:
+            return None
+        self._last_cmd_scale = scale
+        return ("move", *cmd)
+
+    def command_for_new_leg(
+        self,
+    ) -> tuple[str, list[str], list[float], list[list[float]]] | None:
+        """Decide what to command when a fresh nominal leg arrives.
+
+        Issues the leg re-timed at the current scale, anchored at the current joint
+        state. While a protective stop is in effect it keeps holding instead of
+        starting the new leg (planner_node advances legs open-loop, even during a stop).
+
+        Returns the same ``(kind, joint_names, times, positions)`` shape as
+        :meth:`command_for_scale`, or ``None`` when there is nothing to command.
+        """
+        if self._stopped:
+            return self._hold_command()
+        cmd = self.compute_command(resuming=True)
+        if cmd is None:
+            return None
+        self._last_cmd_scale = self._scale
+        return ("move", *cmd)
+
+    def _is_material_change(self, scale: float) -> bool:
+        """True when a scale value warrants (re)issuing a command.
+
+        Stop and resume edges always qualify; otherwise the change must clear the
+        configured dead-band. The very first command (no prior baseline) qualifies.
+        """
+        return (
+            self._just_stopped
+            or self._just_resumed
+            or self._last_cmd_scale is None
+            or abs(scale - self._last_cmd_scale) >= self._republish_epsilon
+        )
+
+    def _hold_command(
+        self,
+    ) -> tuple[str, list[str], list[float], list[list[float]]] | None:
+        """A single-point HOLD at the current joint state (the active stop).
+
+        Returns ``None`` if the current joint state or joint names are unknown —
+        there is nothing meaningful to pin, so we command nothing and let the
+        controller hold its last state.
+        """
+        current = self._current_in_nominal_order()
+        if current is None or self._nominal is None:
+            return None
+        joint_names = self._nominal[0]
+        self._last_cmd_scale = 0.0
+        return (
+            "hold",
+            list(joint_names),
+            [self._hold_time_s],
+            [list(current)],
+        )
 
     # ------------------------------------------------------------------
     # Resume helpers (no-backtrack re-planning)
@@ -239,7 +413,17 @@ class MotionNode(Node):  # type: ignore[misc]  # pragma: no cover
     def __init__(self) -> None:
         super().__init__("motion_node")  # type: ignore[call-arg]
 
-        self._logic = MotionLogic()
+        # Config knobs live next to the package (colcon install + editable layout
+        # both put config/ next to safecollab/), same idiom as safety_monitor
+        # (ground rule 5). _here is the package dir; config/ is beside it.
+        from pathlib import Path
+
+        _here = Path(__file__).resolve().parent
+        motion_cfg = load_motion_config(_here.parent / "config" / "motion.yaml")
+        self._logic = MotionLogic(
+            republish_scale_epsilon=motion_cfg.republish_scale_epsilon,
+            hold_time_s=motion_cfg.hold_time_s,
+        )
 
         _reliable = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -286,20 +470,31 @@ class MotionNode(Node):  # type: ignore[misc]  # pragma: no cover
         positions = [list(p.positions) for p in msg.points]
         self._logic.set_nominal_trajectory(list(msg.joint_names), times, positions)
 
-        cmd = self._logic.compute_command(resuming=False)
+        cmd = self._logic.command_for_new_leg()
         if cmd is not None:
-            self._publish(*cmd, frame_id=msg.header.frame_id)
+            _kind, names, new_times, new_positions = cmd
+            self._publish(names, new_times, new_positions, frame_id=msg.header.frame_id)
 
     def _on_scale(self, msg: "Float32") -> None:
-        """Update the safety scale and publish a re-timed command (or hold)."""
-        is_resume = self._logic.set_scale(float(msg.data))
-        cmd = self._logic.compute_command(resuming=is_resume)
+        """React to a new safety scale: re-time, hold, or (usually) do nothing.
+
+        The dead-band and active-hold decisions live in MotionLogic.command_for_scale;
+        most 20 Hz ticks carry an unchanged scale and return None here, so the
+        controller is not re-commanded every tick (which reset its trajectory clock).
+        """
+        cmd = self._logic.command_for_scale(float(msg.data))
         if cmd is not None:
-            self._publish(*cmd)
+            _kind, names, new_times, new_positions = cmd
+            self._publish(names, new_times, new_positions)
 
     def _on_joint_states(self, msg: "JointState") -> None:
-        """Track current joint positions for the resume re-plan."""
-        self._logic.set_joint_positions(list(msg.position))
+        """Track current joint positions for the resume re-plan.
+
+        The joint NAMES are passed alongside so MotionLogic can realign the
+        state to the trajectory's joint order (/joint_states is alphabetical,
+        the planned trajectory is in ur_manipulator group order).
+        """
+        self._logic.set_joint_positions(list(msg.position), list(msg.name))
 
     # ------------------------------------------------------------------
     # Publication helper

@@ -1,0 +1,23 @@
+# motion.yaml — SafeCollab motion_node tuning (Stream D).
+# Loaded by motion_node via load_motion_config() (paths resolved next to the
+# package, same pattern as safety_monitor/config/safety.yaml). Ground rule 5:
+# these are knobs, so they live here, not as code literals.
+
+motion:
+  # Dead-band on /safety/scale before motion_node re-issues the arm command.
+  # safety_monitor publishes /safety/scale on a fixed 20 Hz tick EVEN WHEN THE
+  # VALUE IS UNCHANGED. Without a dead-band, motion_node would re-publish the
+  # same leg trajectory ~20x/s; the joint_trajectory_controller resets its
+  # trajectory time origin on every message, so it never finishes a leg — the
+  # arm jitters and re-aims at the leg-start pose (the "random swinging" seen in
+  # the demo). Only re-issue when the scale moves by at least this much, or on a
+  # stop/resume edge (those are always honoured regardless of the dead-band).
+  republish_scale_epsilon: 0.02
+
+  # Protective-stop hold horizon (seconds). On scale == 0 motion_node commands
+  # the CURRENT joint position over this short time so the controller actively
+  # holds. joint_trajectory_controller does NOT stop when commands go silent —
+  # it drives the active trajectory to completion — so "hold by inaction" would
+  # let the arm coast to the leg end after a RED. A small positive horizon makes
+  # the stop immediate without a zero-duration (instantaneous) goal.
+  hold_time_s: 0.2

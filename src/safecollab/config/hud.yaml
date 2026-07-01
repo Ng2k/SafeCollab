@@ -1,0 +1,28 @@
+# Console HUD configuration — P5 (the terminal safety readout, hud_node.py).
+#
+# The HUD is a VIEW only: it never affects the safety loop. Parameters are read
+# at node start-up (AGENTS.md ground rule 5: config, not constants).
+#
+# refresh_hz
+#   How often the single HUD line is redrawn in place. A few Hz is plenty for a
+#   human reader and keeps the terminal calm; the safety loop itself runs at
+#   20 Hz regardless of this.
+#
+# use_colour
+#   Colour the zone word with ANSI codes (true) or print plain text (false).
+#   Plain text still passes the 5-second legibility check (the words GREEN /
+#   YELLOW / RED / LOST are self-describing) for terminals that mangle colour.
+#
+# colours
+#   Zone -> ANSI SGR code (integers, not raw escapes, so the YAML stays clean).
+#   31 red, 32 green, 33 yellow, 90 bright-black/grey. hud_node builds the escape
+#   sequences from these (see build_colour_map).
+
+hud:
+  refresh_hz: 5.0
+  use_colour: true
+  colours:
+    green: 32   # green
+    yellow: 33  # yellow
+    red: 31     # red
+    lost: 90    # grey (bright black) — signals perception failure

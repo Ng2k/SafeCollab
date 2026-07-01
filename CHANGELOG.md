@@ -17,7 +17,76 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
-- _(work in progress toward the next tag)_
+P5 — polish & demo (toward `v0.5.0`); see `docs/ROADMAP-P5.md`.
+
+### Added
+
+- feat(viz): **RViz zone visualisation** (P5 sprint 1). `safety_monitor` now also
+  publishes a floating `TEXT_VIEW_FACING` zone label (`/viz/safety_marker` id 1,
+  e.g. `RED` / `LOST`) above the existing zone sphere (id 0), sharing the single
+  `_ZONE_RGBA` source so the two colours can never drift. `cell.launch.py` gains
+  an `rviz:=true` argument (default `false`, so CI/headless and the scenario
+  harness are unchanged) that starts `rviz2 -d config/view.rviz`; `view.rviz`
+  gains a Marker display on `/viz/safety_marker`. Label gap above the sphere and
+  glyph height are configurable (`marker_label_offset`, `marker_label_height` in
+  `config/safety.yaml`; ground rule 5).
+- test(viz): unit-cover the label geometry (`_marker_params` label text/position)
+  and assert the marker contract live (AT-V in the AT-1..AT-5 harness): the sphere
+  is zone-coloured and the text label names the zone in the matching colour, on
+  `/viz/safety_marker` — folded into the existing bring-up (no extra launch).
+- feat(hud): **console safety HUD** (P5 sprint 2). A view-only `hud_node`
+  subscribes `/safety/{zone,scale,min_distance}` and redraws one aligned,
+  colour-coded terminal line in place, e.g. `SSM | RED    | speed   0% | min-dist
+  0.38 m` — the 5-second legibility readout. `cell.launch.py` gains `hud:=true`
+  (default `false`, so CI/headless and the scenario harness are unchanged);
+  refresh rate, colour on/off, and the per-zone ANSI codes live in
+  `config/hud.yaml` (ground rule 5). In `lost` the distance is shown as `--`
+  (FR-9: a stale last position is never displayed). The pure formatter
+  (`format_status`) is unit-tested; `HudNode` is a thin I/O shell over it.
+- feat(demo): **one-command demo** (P5 sprint 3). `scripts/record-demo.sh` brings
+  up the full cell with the GUI (Gazebo + RViz zone sphere/label) and the console
+  HUD, driven by the *perceived* operator, with X11 passthrough; a `failsafe`
+  subcommand cues the transient detection-loss (`lost` → re-acquire) on demand (or
+  `--auto-failsafe` fires it hands-free), and `Ctrl-C` / `down` tears everything
+  down cleanly. RViz is layered onto a demo-only image (`scripts/demo.Dockerfile`:
+  `safecollab:dev` + `ros-jazzy-rviz2`) so the lean image CI builds and the
+  deliver job ships stays free of Qt/OGRE. `docs/DEMO.md` is the recording
+  walkthrough (windows, cues, GIF capture, the 5-second legibility check); the GIF
+  lands at `docs/media/`.
+
+### Fixed
+
+- fix(motion): **align `/joint_states` to the planned trajectory joint order**.
+  The UR broadcaster publishes joints alphabetically (`elbow`, `shoulder_lift`,
+  `shoulder_pan`, …) while the Pilz trajectory uses `ur_manipulator` group order
+  (`shoulder_pan` first), so `motion_node` spliced the resume/hold waypoint with
+  `shoulder_pan` ↔ `elbow` swapped — the arm jerked and barely moved. It now
+  realigns the current state by joint name before use.
+- fix(perception): **realistic detection confidence so a green zone is reachable**.
+  Confidence was the blob's fraction of the whole frame (~0.02 for the overhead
+  marker), which maxed the σ term and inflated the ISO/TS 15066 thresholds
+  (d_yellow ≈ 1.0 m > cell size) so the operator was never far enough to register
+  green. Confidence now measures the blob against an expected operator size, so a
+  clean detection is confident (σ ≈ 0.10 m) and the robot gets a full-speed window.
+- fix(cell): **reachable feeder bins**. Bins were tucked behind the base (folded
+  back-reach) and then on the shoulder-singularity line (the mirrored `+y` reach
+  was unreachable). They now flank the base forward-of-centre at `(0.15, ±0.35)`
+  on a slightly widened table — a well-conditioned front-side pick.
+- fix(planner): **closed-loop leg pacing**. The planner advanced legs by wall-clock
+  time, so an SSM slow-down/stop near the operator abandoned the in-progress pick
+  ("arm stops short of the bin"). It now waits until the arm reaches each leg goal
+  (name-aligned joint check, generous timeout) before advancing, so a stop merely
+  delays the pick and the arm always completes it when the operator clears.
+- fix(planner): **pick descends INTO the bin and both bins get picked**. The pick
+  height equalled the bin's top surface (arm stopped on the rim / hovered above the
+  tray); it now dips to `z=0.78` from a raised `0.98` hover — a visible ~0.20 m
+  stroke. The pacing budget is also more patient (~15 s), so the bin on the
+  operator's approach side waits the operator out instead of timing out mid-descent
+  and being skipped — both bins are now reliably picked. Cadence is tighter too
+  (shorter DROP/settle dwells), kept snappy while the SSM escalation still recurs.
+- fix(human): **smoother operator**. The gz operator body was moved at 10 Hz; raised
+  to 30 Hz (background thread, so no impact on the TF broadcast or path advancement)
+  for visibly more fluid operator motion.
 
 ---
 

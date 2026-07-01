@@ -59,6 +59,16 @@ REACH_Z: float = 0.82
 STANDING_Z: float = 1.10
 APPROACH_Z: float = 0.95
 
+#: Seconds the operator stands clear of the cell at the start of each traversal
+#: before approaching the tray — a contiguous GREEN window (operator ~0.9 m from
+#: the arm's tray pose, beyond d_yellow) so the arm can run its MoveIt-planned
+#: kitting between reaches. Kept short enough that the operator reaches the shared
+#: tray often over a long run: with the UR5e's ~15 s planned cycle, too long a
+#: dwell means too few tray reaches co-occur with the arm at the tray, so the
+#: red protective stop (and AT-6's ≥3 escalations) become rare. Held fixed (not
+#: scaled by the ±40 % approach-speed randomisation).
+STANDING_DWELL_S: float = 5.0
+
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -216,24 +226,45 @@ class OperatorPath:
         reach_x = TRAY_CENTRE[0] + rng.uniform(-TRAY_HALF_X * 0.8, TRAY_HALF_X * 0.8)
         reach_y = rng.uniform(-TRAY_HALF_Y * 0.6, TRAY_HALF_Y * 0.6)
 
-        # Timing scale (±40 % speed variation)
+        # Timing scale (±40 % speed variation) applied to the approach/reach/
+        # withdraw phase. The standing dwell is ALSO randomised per cycle: a fixed
+        # dwell makes the operator's period near-commensurate with the arm's kitting
+        # period, so their phases lock and a tray reach rarely coincides with the arm
+        # at the tray (few red escalations). Varying the dwell breaks that lock so
+        # the green→yellow→red escalation recurs across cycles (AT-6).
         t_scale = rng.uniform(0.7, 1.4)
+        d = STANDING_DWELL_S * rng.uniform(0.5, 1.6)  # randomised GREEN window
 
         waypoints = [
-            # 0 — standing back from table
-            Waypoint(x=0.9, y=side_y, z=STANDING_Z, t=0.0),
-            # 1 — table edge, leaning toward tray area
-            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(2.0 * t_scale, 3)),
-            # 2 — hover above tray
-            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(4.0 * t_scale, 3)),
-            # 3 — tray reach (hand inside tray)
-            Waypoint(x=reach_x, y=reach_y, z=REACH_Z, t=round(5.5 * t_scale, 3)),
-            # 4 — withdraw (hand back above tray)
-            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(7.0 * t_scale, 3)),
-            # 5 — step back from table
-            Waypoint(x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(9.0 * t_scale, 3)),
-            # 6 — return to standing
-            Waypoint(x=0.9, y=side_y, z=STANDING_Z, t=round(11.0 * t_scale, 3)),
+            # 0 — standing well clear of the table (start of the dwell). Pushed back
+            #     to ~1 m so the operator is unambiguously GREEN even while the arm
+            #     is parked at the tray (see the DROP dwell in planner_node).
+            Waypoint(x=1.0, y=side_y * 1.1, z=STANDING_Z, t=0.0),
+            # 1 — still standing back (end of the dwell): a contiguous green window
+            Waypoint(x=1.0, y=side_y * 1.1, z=STANDING_Z, t=round(d, 3)),
+            # 2 — table edge, leaning toward tray area
+            Waypoint(
+                x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 2.0 * t_scale, 3)
+            ),
+            # 3 — hover above tray
+            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(d + 4.0 * t_scale, 3)),
+            # 4 — tray reach (hand inside tray) → drives the zone to red
+            Waypoint(x=reach_x, y=reach_y, z=REACH_Z, t=round(d + 5.5 * t_scale, 3)),
+            # 4b — HOLD the reach: the operator works in the shared tray briefly.
+            #      Kept short (~2 s) for a snappier demo — closed-loop pacing already
+            #      makes the arm WAIT at the tray while the operator is close, so the
+            #      red co-occupancy is reliable without a long static hold here.
+            Waypoint(x=reach_x, y=reach_y, z=REACH_Z, t=round(d + 7.5 * t_scale, 3)),
+            # 5 — withdraw (hand back above tray)
+            Waypoint(x=reach_x, y=reach_y, z=APPROACH_Z, t=round(d + 9.0 * t_scale, 3)),
+            # 6 — step back from table
+            Waypoint(
+                x=0.7, y=side_y * 0.4, z=APPROACH_Z, t=round(d + 11.0 * t_scale, 3)
+            ),
+            # 7 — return to standing (well clear again)
+            Waypoint(
+                x=1.0, y=side_y * 1.1, z=STANDING_Z, t=round(d + 13.0 * t_scale, 3)
+            ),
         ]
 
         return cls(waypoints)
@@ -369,7 +400,7 @@ def main(args=None):  # pragma: no cover
         Generates a random ``OperatorPath`` at start-up, then replaces it with a
         fresh random path each time the current path completes.  Broadcasts the
         ground-truth ``world → human_gt`` TF at 50 Hz and moves the yellow gz
-        operator entity at 10 Hz so perception_node can detect it.
+        operator entity at 30 Hz so perception_node can detect it.
         """
 
         _GT_FRAME = "human_gt"
@@ -444,7 +475,7 @@ def main(args=None):  # pragma: no cover
             if self._gz_node is not None:
                 self.get_logger().info(
                     "[human_node] gz transport available; operator body will "
-                    "track the path at 10 Hz via /world/empty/set_pose"
+                    "track the path at 30 Hz via /world/empty/set_pose"
                 )
             else:
                 self.get_logger().warning(
@@ -497,7 +528,7 @@ def main(args=None):  # pragma: no cover
         def _gz_pose_worker(self) -> None:
             """Background loop: push the latest target pose to gz, off the timer.
 
-            Drains ``_gz_target`` at ~20 Hz and calls the synchronous (possibly
+            Drains ``_gz_target`` at ~30 Hz and calls the synchronous (possibly
             slow) gz ``set_pose`` service here so it can never stall the ROS timer
             that advances the path and broadcasts the ground-truth TF.
             """
@@ -509,8 +540,10 @@ def main(args=None):  # pragma: no cover
                     target = self._gz_target
                 if target is not None:
                     self._set_gz_pose(*target)
-                time.sleep(0.1)  # ~10 Hz best-effort — enough for smooth visual
-                # tracking while keeping gz-service load (and headless CPU) low.
+                time.sleep(0.033)  # ~30 Hz best-effort — smoother visual operator
+                # tracking. On a background thread (never the ROS timer), so the extra
+                # gz-service calls can't stall path advancement or the 50 Hz TF; the
+                # cost is only a little more gz-transport traffic.
 
         def _set_gz_pose(self, x: float, y: float, z: float) -> None:
             """Move the yellow operator gz entity to ``(x, y, z)`` via set_pose.
