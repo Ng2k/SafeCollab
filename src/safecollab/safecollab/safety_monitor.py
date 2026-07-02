@@ -34,7 +34,6 @@ from __future__ import annotations
 import math
 from pathlib import Path
 from types import SimpleNamespace
-from typing import List, Optional, Tuple
 
 import yaml
 
@@ -191,8 +190,8 @@ class SafetyMonitorLogic:
 
     @staticmethod
     def _min_distance(
-        robot_frames_xyz: List[Tuple[float, float, float]],
-        human_xyz: Tuple[float, float, float],
+        robot_frames_xyz: list[tuple[float, float, float]],
+        human_xyz: tuple[float, float, float],
     ) -> float:
         """Euclidean minimum distance from any robot frame to the human.
 
@@ -216,7 +215,7 @@ class SafetyMonitorLogic:
     @staticmethod
     def _marker_params(
         zone: str,
-        human_xyz_or_none: Optional[Tuple[float, float, float]],
+        human_xyz_or_none: tuple[float, float, float] | None,
         radius: float,
         label_offset: float = 0.0,
     ) -> dict:
@@ -262,10 +261,10 @@ class SafetyMonitorLogic:
 
     def compute(
         self,
-        robot_frames_xyz: List[Tuple[float, float, float]],
-        human_xyz_or_none: Optional[Tuple[float, float, float]],
+        robot_frames_xyz: list[tuple[float, float, float]],
+        human_xyz_or_none: tuple[float, float, float] | None,
         uncertainty: float,
-    ) -> Tuple[str, float, Optional[float], dict]:
+    ) -> tuple[str, float, float | None, dict]:
         """Compute zone, speed scale, minimum distance, and RViz marker params.
 
         This is the hot path called on every tick.
@@ -299,7 +298,7 @@ class SafetyMonitorLogic:
         if human_xyz_or_none is None or not robot_frames_xyz:
             # Fail-safe: perception lost/stale, or no robot frame data.
             # Pass d=None to classify() — it returns ("lost", 0.0) per FR-9.
-            d: Optional[float] = None
+            d: float | None = None
         else:
             d = self._min_distance(robot_frames_xyz, human_xyz_or_none)
 
@@ -376,7 +375,7 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
         risk_cfg = load_risk_config(config_path("risk.yaml"))
         safety_cfg = load_safety_config(config_path("safety.yaml"))
         self._logic = SafetyMonitorLogic(risk_cfg, safety_cfg)
-        self._robot_frames: List[str] = safety_cfg.robot_frames
+        self._robot_frames: list[str] = safety_cfg.robot_frames
 
         # Perception uncertainty (updated by subscriber callback)
         self._uncertainty: float = 0.0
@@ -442,7 +441,7 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
     # TF helpers
     # ------------------------------------------------------------------
 
-    def _lookup_robot_frames(self) -> List[Tuple[float, float, float]]:
+    def _lookup_robot_frames(self) -> list[tuple[float, float, float]]:
         """Return world-frame positions for each configured robot frame.
 
         Frames that cannot be looked up (e.g. not yet available) are silently
@@ -465,7 +464,7 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
                 pass
         return positions
 
-    def _lookup_human_tf(self) -> Optional[Tuple[float, float, float]]:
+    def _lookup_human_tf(self) -> tuple[float, float, float] | None:
         """Return the perceived human world-frame position, or ``None``.
 
         A transform older than ``loss_timeout`` is treated as stale — the
@@ -507,7 +506,7 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
         self,
         zone: str,
         scale: float,
-        dist: Optional[float],
+        dist: float | None,
         marker_p: dict,
     ) -> None:
         """Publish zone, scale, distance, and RViz marker."""

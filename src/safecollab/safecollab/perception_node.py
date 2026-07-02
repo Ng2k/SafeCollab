@@ -28,6 +28,7 @@ Requirements (AGENTS.md §6):
 
 from __future__ import annotations
 
+import math
 from typing import Optional, Tuple
 
 import cv2
@@ -253,15 +254,9 @@ def detect_human(
     u = moments["m10"] / moments["m00"]
     v = moments["m01"] / moments["m00"]
 
-    # Confidence = how completely the blob fills the EXPECTED operator size,
-    # not its fraction of the whole frame. The old "area / image_area" made a
-    # clearly-visible overhead marker (a few thousand px in a 640×480 frame)
-    # score ~0.02 confidence, which maxed the σ noise term and inflated the
-    # ISO/TS 15066 thresholds so far (d_yellow ≈ 1.0 m) that the operator was
-    # NEVER far enough to register green in this cell. Normalising by a
-    # reference blob area (conf_area_ref_px) makes a full, solid detection
-    # confident (σ small → realistic thresholds → a real green window), while a
-    # partial/occluded blob still scores low (σ grows → more conservative).
+    # Confidence = how completely the blob fills the EXPECTED operator size
+    # (conf_area_ref_px), not its fraction of the frame: a full, solid detection
+    # is confident (σ small); a partial/occluded blob scores low (σ grows).
     confidence = min(1.0, area / conf_area_ref_px) if conf_area_ref_px > 0 else 0.0
 
     return u, v, area, confidence
@@ -412,9 +407,7 @@ def _derive_intrinsics(
     Returns:
         ``(fx, fy, cx, cy)`` in pixels.
     """
-    import math as _math
-
-    fx = (width / 2.0) / _math.tan(hfov_rad / 2.0)
+    fx = (width / 2.0) / math.tan(hfov_rad / 2.0)
     fy = fx  # square pixels assumed
     cx = width / 2.0
     cy = height / 2.0
@@ -467,8 +460,6 @@ def cam_to_world_transform(
     Returns:
         4×4 ``numpy.ndarray`` (camera optical frame → world).
     """
-    import math as _math
-
     # Rx(−π/2): [1 0 0 / 0 0 1 / 0 −1 0]
     Rx_neg90 = np.array(
         [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]],
@@ -482,8 +473,8 @@ def cam_to_world_transform(
     )
 
     # Ry(pitch_rad): camera-body pitch from mast_to_camera joint
-    cp = _math.cos(pitch_rad)
-    sp = _math.sin(pitch_rad)
+    cp = math.cos(pitch_rad)
+    sp = math.sin(pitch_rad)
     Ry_pitch = np.array(
         [[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]],
         dtype=float,

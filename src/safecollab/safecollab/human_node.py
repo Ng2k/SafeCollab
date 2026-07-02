@@ -60,13 +60,9 @@ STANDING_Z: float = 1.10
 APPROACH_Z: float = 0.95
 
 #: Seconds the operator stands clear of the cell at the start of each traversal
-#: before approaching the tray — a contiguous GREEN window (operator ~0.9 m from
-#: the arm's tray pose, beyond d_yellow) so the arm can run its MoveIt-planned
-#: kitting between reaches. Kept short enough that the operator reaches the shared
-#: tray often over a long run: with the UR5e's ~15 s planned cycle, too long a
-#: dwell means too few tray reaches co-occur with the arm at the tray, so the
-#: red protective stop (and AT-6's ≥3 escalations) become rare. Held fixed (not
-#: scaled by the ±40 % approach-speed randomisation).
+#: — a contiguous GREEN window (beyond d_yellow) so the arm can run its kitting
+#: between reaches. Tuned so tray reaches still co-occur often enough with the
+#: arm to drive the red protective stop (AT-6 needs ≥3 escalations across paths).
 STANDING_DWELL_S: float = 5.0
 
 
@@ -226,12 +222,10 @@ class OperatorPath:
         reach_x = TRAY_CENTRE[0] + rng.uniform(-TRAY_HALF_X * 0.8, TRAY_HALF_X * 0.8)
         reach_y = rng.uniform(-TRAY_HALF_Y * 0.6, TRAY_HALF_Y * 0.6)
 
-        # Timing scale (±40 % speed variation) applied to the approach/reach/
-        # withdraw phase. The standing dwell is ALSO randomised per cycle: a fixed
-        # dwell makes the operator's period near-commensurate with the arm's kitting
-        # period, so their phases lock and a tray reach rarely coincides with the arm
-        # at the tray (few red escalations). Varying the dwell breaks that lock so
-        # the green→yellow→red escalation recurs across cycles (AT-6).
+        # Timing scale (±40 % speed variation) on the approach/reach/withdraw
+        # phase. The dwell is randomised per cycle too, so the operator's period
+        # never phase-locks to the arm's kitting period (which would make tray
+        # reaches rarely coincide with the arm — few red escalations; AT-6).
         t_scale = rng.uniform(0.7, 1.4)
         d = STANDING_DWELL_S * rng.uniform(0.5, 1.6)  # randomised GREEN window
 
