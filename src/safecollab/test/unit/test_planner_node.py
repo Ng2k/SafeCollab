@@ -7,7 +7,7 @@ Only the ROS/MoveIt-free parts are tested (``kitting_legs``, ``cycle_sequence``,
 
 import pytest
 
-from safecollab.planner_node import KittingLeg, cycle_sequence, kitting_legs
+from safecollab.planning import KittingLeg, cycle_sequence, kitting_legs
 
 
 def test_one_cycle_has_six_legs_in_order():
