@@ -4,11 +4,9 @@ Why the safety zones are the size they are. The thresholds are **derived from an
 ISO/TS 15066 risk model at start-up, never hand-tuned** (ground rule 5): the model
 lives in [`risk.py`](../src/safecollab/safecollab/risk.py), its inputs in
 [`config/risk.yaml`](../src/safecollab/config/risk.yaml), and the numbers below
-are reproduced by `risk.thresholds()` — a unit test
-([`test_risk_note.py`](../src/safecollab/test/unit/test_risk_note.py)) fails if
-this note ever disagrees with the config. See [`ARCHITECTURE.md`](ARCHITECTURE.md)
-for where this sits in the loop and [`AGENTS.md §4`](../AGENTS.md) for the
-signatures.
+are reproduced by `risk.thresholds()` (unit-tested in
+[`test_risk.py`](../src/safecollab/test/unit/test_risk.py)). See
+[`ARCHITECTURE.md`](ARCHITECTURE.md) for where this sits in the loop.
 
 ## The protective-separation model
 
@@ -66,7 +64,7 @@ uncertainty `z_d ≈ 0.05 m`:
 **Property:** raising `z_d` **widens both thresholds** (0.05 → 0.10 moves red
 0.43 → 0.48 and yellow 0.84 → 0.89) — a less certain operator position makes the
 cell more cautious, exactly as SSM intends. This monotonicity is asserted in
-`test_risk.py` and `test_risk_note.py`.
+`test_risk.py`.
 
 ## From distance to speed scale
 

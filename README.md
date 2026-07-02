@@ -75,5 +75,4 @@ GitHub Release asset with the matching changelog. See
 | [`docs/ROBUSTNESS.md`](docs/ROBUSTNESS.md) | Robustness behaviour (P4) |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history (SemVer) |
 
-Development ground rules and the phase roadmap live in
-[`AGENTS.md`](AGENTS.md) and `docs/ROADMAP-P*.md`.
+The phase roadmap lives in `docs/ROADMAP-P*.md`.

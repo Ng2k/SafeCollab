@@ -23,7 +23,7 @@ P6 — documentation & finalisation (toward `v0.6.0`); see `docs/ROADMAP-P6.md`.
 
 - docs(roadmap): **P6 documentation & finalisation roadmap** (`docs/ROADMAP-P6.md`)
   — the Agile plan for the final documentation set (README, architecture image,
-  risk note, CHANGELOG), each pinned to the build with doc-consistency tests.
+  risk note, CHANGELOG).
 - docs(architecture): **`docs/ARCHITECTURE.md`** — a GitHub-native Mermaid
   data-flow diagram plus a per-node walk and the ISO/TS 15066 speed-scaling loop
   (`perception → safety_monitor → /safety/scale → motion_node → arm`).
@@ -33,12 +33,6 @@ P6 — documentation & finalisation (toward `v0.6.0`); see `docs/ROADMAP-P6.md`.
 - docs(readme): **README build-out** — what/why, the one-command run and headless
   launch, "how it works" links to the architecture/risk docs, a testing/CI
   overview, and a documentation index.
-- test(docs): **doc-consistency test suite** (`test_architecture_doc.py`,
-  `test_risk_note.py`, `test_readme.py`, `test_doc_links.py`) — the P6 TDD slice:
-  the architecture diagram must name every shipped node (from `setup.py`) and the
-  contract topics, the risk note's numbers must equal `risk.py`, the README must
-  document the run and link the docs, and every internal Markdown link must
-  resolve. Pure Python, no new dependency; safety/risk coverage unchanged (99 %).
 
 ---
 

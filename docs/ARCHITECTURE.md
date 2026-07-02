@@ -1,9 +1,9 @@
 # SafeCollab — Architecture & Data Flow
 
 How the pieces fit together and how the **ISO/TS 15066 Speed-and-Separation
-Monitoring (SSM)** loop governs the robot. The authoritative interface contract
-(topics, types, QoS) is [`AGENTS.md §3`](../AGENTS.md); this document is the
-picture and the walk-through. The safety maths behind the zones is in
+Monitoring (SSM)** loop governs the robot. This document is the
+picture and the walk-through of the node graph and the SSM loop. The safety maths
+behind the zones is in
 [`RISK.md`](RISK.md); the recorded behaviour is in [`DEMO.md`](DEMO.md).
 
 ## One paragraph
