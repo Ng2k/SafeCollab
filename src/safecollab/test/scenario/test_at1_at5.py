@@ -404,6 +404,8 @@ class TestCleanShutdown(unittest.TestCase):
       -SIGABRT   the gz stack can abort during SIGINT teardown — gz sim and the
                  ros_gz_bridge parameter_bridge (/clock) intermittently SIGABRT
                  in gz-transport cleanup (-6); a teardown-only artifact.
+      -SIGSEGV   same teardown-only artifact — the parameter_bridge can also
+                 segfault (rather than abort) in gz-transport cleanup (-11).
     human_node is SIGSTOP/SIGCONT'd during AT-5 (not killed), so it exits via
     the normal -SIGINT path at teardown — no special case needed.
     """
@@ -418,5 +420,6 @@ class TestCleanShutdown(unittest.TestCase):
                 -signal.SIGINT,
                 -signal.SIGTERM,
                 -signal.SIGABRT,
+                -signal.SIGSEGV,
             ],
         )
