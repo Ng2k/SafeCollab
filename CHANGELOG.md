@@ -21,6 +21,52 @@ _Nothing yet._
 
 ---
 
+## [0.7.0] - 2026-07-02 — P7: refactoring & optimization
+
+Technical-debt reduction only — **no new functionality and no behavioural
+change**. Readability, maintainability, and comment quality across the node
+package, with the unit gate (288 tests, ≥ 90 % safety/risk coverage) green at
+every step and live behaviour unchanged (same topics, QoS, config, and teardown
+semantics).
+
+### Added
+
+- **`safecollab/_ros_runtime.py`** — shared ROS 2 lifecycle glue: the QoS
+  profile factories, the `config/` path resolver, and a single
+  `spin_and_shutdown()` wrapping the SIGINT teardown-race guard that every node
+  had copy-pasted.
+- docs(roadmap): **`docs/ROADMAP-P7.md`** — the Agile plan for this phase.
+
+### Changed
+
+- Consolidated the `docs/` set (architecture, risk, demo, validate, robustness)
+  into a single built-out **`README.md`**, keeping the substantive content and
+  dropping the low-value bulk.
+- Extracted the duplicated lifecycle boilerplate from the four module-level
+  nodes into `_ros_runtime` (−123 net lines; identical QoS/config/teardown).
+- Lifted **`HumanNode`** out of `main()` to module scope behind the standard
+  `try: import rclpy` guard, matching the other nodes.
+- Readability pass: trimmed verbose bug post-mortem comments to concise "why",
+  hoisted in-function stdlib imports to module top, normalised `safety_monitor`
+  typing to PEP 585.
+- `SafetyMonitorLogic._min_distance` takes the square root once on the nearest
+  frame instead of per frame (identical result).
+
+### Fixed
+
+- Removed stale, now-false provenance comments ("Stream C/G not yet merged") in
+  `perception_node` and `safety_monitor` — both the node and the launch file
+  they claimed were missing exist.
+- Package metadata (`setup.py` + `package.xml`): `version` 0.1.0 → 0.7.0,
+  real maintainer name and email (`license` still pending a decision).
+
+### Removed
+
+- `docs/ARCHITECTURE.md`, `docs/DEMO.md`, `docs/RISK.md`, `docs/ROBUSTNESS.md`,
+  `docs/VALIDATE.md` — folded into `README.md`.
+
+---
+
 ## [0.6.0] - 2026-07-02 — P6: documentation & finalisation
 
 The final documentation set required by the Definition of Done (§12.6): a

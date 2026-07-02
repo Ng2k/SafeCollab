@@ -205,12 +205,14 @@ class SafetyMonitorLogic:
             The minimum Euclidean distance (metres) over all robot frames.
         """
         hx, hy, hz = human_xyz
-        min_d = math.inf
+        # sqrt is monotonic, so pick the nearest frame by squared distance and take
+        # the root once at the end rather than per frame.
+        min_sq = math.inf
         for rx, ry, rz in robot_frames_xyz:
-            d = math.sqrt((rx - hx) ** 2 + (ry - hy) ** 2 + (rz - hz) ** 2)
-            if d < min_d:
-                min_d = d
-        return min_d
+            d_sq = (rx - hx) ** 2 + (ry - hy) ** 2 + (rz - hz) ** 2
+            if d_sq < min_sq:
+                min_sq = d_sq
+        return math.sqrt(min_sq)
 
     @staticmethod
     def _marker_params(
