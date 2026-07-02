@@ -1,4 +1,4 @@
-"""TDD spec for safecollab.perception_node — Stream C geometry & logic.
+"""TDD spec for the safecollab.perception package — geometry & logic.
 
 Tests cover the pure-Python core that runs without any ROS graph:
 
@@ -21,7 +21,7 @@ import math
 import numpy as np
 import pytest
 
-from safecollab.perception_node import (
+from safecollab.perception import (
     PerceptionLogic,
     _derive_intrinsics,
     back_project,

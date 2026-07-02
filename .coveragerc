@@ -10,3 +10,4 @@
 [run]
 omit =
     */safecollab/_ros_runtime.py
+    */safecollab/perception/node.py

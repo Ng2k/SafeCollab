@@ -54,7 +54,7 @@ setup(
         "console_scripts": [
             "planner_node = safecollab.planner_node:main",
             "human_node = safecollab.human_node:main",
-            "perception_node = safecollab.perception_node:main",
+            "perception_node = safecollab.perception.node:main",
             "safety_monitor = safecollab.safety_monitor:main",
             "motion_node = safecollab.motion_node:main",
             "hud_node = safecollab.hud_node:main",
