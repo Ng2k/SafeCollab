@@ -17,7 +17,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
-_Nothing yet._
+P6 — documentation & finalisation (toward `v0.6.0`); see `docs/ROADMAP-P6.md`.
+
+### Added
+
+- docs(roadmap): **P6 documentation & finalisation roadmap** (`docs/ROADMAP-P6.md`)
+  — the Agile plan for the final documentation set (README, architecture image,
+  risk note, CHANGELOG), each pinned to the build with doc-consistency tests.
 
 ---
 
