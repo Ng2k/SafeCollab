@@ -178,7 +178,7 @@ def generate_launch_description():
     # empty.sdf does not load the gz Sensors system, so the cell camera never
     # renders and /camera/image stays silent (perception goes blind, safety
     # fail-safes to 'lost'). cell.sdf is empty.sdf + the Sensors system; see
-    # the header of worlds/cell.sdf and docs/VALIDATE.md.
+    # the header of worlds/cell.sdf and README.md.
     cell_world = PathJoinSubstitution(
         [FindPackageShare("safecollab"), "worlds", "cell.sdf"]
     )

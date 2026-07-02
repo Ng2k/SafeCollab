@@ -134,7 +134,7 @@
        (x 0.35..0.9, y ±0.65, z 0.82..1.10), not just the tray. With the older
        low/narrow mast the standing/approach parts of the operator path fell
        outside the frame, perception lost the operator between tray reaches, and
-       the safety loop dropped to the 'lost' fail-safe. See docs/VALIDATE.md and
+       the safety loop dropped to the 'lost' fail-safe. See README.md and
        perception_node.cam_to_world_transform (its defaults mirror this chain). -->
   <xacro:box_link name="camera_mast" sx="0.04" sy="0.04" sz="1.70" mass="2.0" material="cam_mat"/>
   <joint name="top_to_mast" type="fixed">

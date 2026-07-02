@@ -16,7 +16,7 @@
   `camera/image` advertised, but no frames were ever produced — the
   ros_gz_image bridge had nothing to forward, /camera/image stayed silent,
   perception_node went blind, and the safety loop sat in the fail-safe `lost`
-  protective stop. (See docs/VALIDATE.md; this is the exact failure the
+  protective stop. (See README.md; this is the exact failure the
   perceived-path validation surfaced.)
 
   The world name is deliberately kept as "empty" so the gz transport service
