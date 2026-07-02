@@ -15,11 +15,10 @@ Architecture note (AGENTS.md §3, §6 FR-11)
 Module layout
 -------------
 Pure-Python classes (``Waypoint``, ``OperatorPath``, ``OperatorModel``) are at
-the top with **no ROS imports** — unit-testable without a live ROS graph.
-
-The ROS 2 node wrapper lives inside ``main()`` (``# pragma: no cover``) so that
-importing this module in a plain-Python test environment never fails due to a
-missing ``rclpy`` installation.
+the top with **no ROS imports** — unit-testable without a live ROS graph. The
+``HumanNode`` ROS wrapper below is guarded by a ``try: import rclpy`` block (the
+same pattern as the other nodes), so importing this module in a plain-Python
+test environment never fails on a missing ``rclpy``.
 
 Cell geometry (world frame, metres) — from ``urdf/cell.xacro``
 ---------------------------------------------------------------
@@ -315,285 +314,234 @@ class OperatorModel:
 
 
 # ---------------------------------------------------------------------------
-# ROS 2 node wrapper  (requires rclpy — excluded from unit-test coverage)
+# ROS 2 node wrapper (requires rclpy — not available in the pure-Python venv)
+# ---------------------------------------------------------------------------
+
+try:
+    import rclpy  # pragma: no cover
+    from geometry_msgs.msg import TransformStamped  # pragma: no cover
+    from rclpy.node import Node  # pragma: no cover
+    from tf2_ros import TransformBroadcaster  # pragma: no cover
+
+    from safecollab._ros_runtime import spin_and_shutdown  # pragma: no cover
+
+    _HAS_ROS = True  # pragma: no cover
+except ImportError:
+    _HAS_ROS = False
+    Node = object  # type: ignore[assignment,misc]
+
+# Optional gz transport bindings for operator body pose following. gz Harmonic
+# ships gz-transport 13 / gz-msgs 10 (apt: python3-gz-transport13 /
+# python3-gz-msgs10, listed in the Dockerfile). If absent, the except branch runs
+# and visual body tracking is silently disabled — the TF broadcast is unaffected.
+_GzTransportNode = None
+_GzPose = None
+_GzBoolean = None
+try:
+    from gz.transport13 import Node as _GzTransportNode  # type: ignore[import] # pragma: no cover
+    from gz.msgs10.pose_pb2 import Pose as _GzPose  # type: ignore[import] # pragma: no cover
+    from gz.msgs10.boolean_pb2 import Boolean as _GzBoolean  # type: ignore[import] # pragma: no cover
+except ImportError:
+    pass  # gz Python bindings not installed; visual body tracking disabled
+
+
+class HumanNode(Node):  # type: ignore[misc]  # pragma: no cover
+    """ROS 2 wrapper around ``OperatorModel``.
+
+    Generates a random ``OperatorPath`` at start-up, then replaces it with a
+    fresh random path each time the current path completes. Broadcasts the
+    ground-truth ``world → human_gt`` TF at 50 Hz — named ``human_gt`` (not
+    ``human``) so it is never confused with the *perceived* ``world → human`` TF
+    the safety monitor actually consumes.
+
+    Gz-transport pose following
+    ---------------------------
+    The node also moves the yellow operator visual body (spawned from
+    ``urdf/operator.sdf`` by ``cell.launch.py``) via the gz sim service
+    ``/world/empty/set_pose``, so the overhead camera sees it and
+    ``perception_node`` can detect the operator with no physical person. The
+    ``set_pose`` call runs on a **background worker thread**, never on the ROS
+    timer: ``gz.transport13.Node.request()`` is synchronous and under sim load
+    can block far longer than its timeout, which — called from the 50 Hz timer —
+    froze both the ``human_gt`` broadcast and the marker. The timer only stores
+    the latest target pose; the worker drains it best-effort. (There is no
+    ros_gz service bridge for the gz-transport-only ``set_pose`` endpoint, and gz
+    transport works headless, which is why it is called directly.)
+    """
+
+    _GT_FRAME = "human_gt"
+    _WORLD_FRAME = "world"
+    _TIMER_HZ = 50.0
+
+    # gz transport pose-following constants
+    _GZ_SET_POSE_SVC: str = "/world/empty/set_pose"
+    _GZ_ENTITY_NAME: str = "operator"
+
+    # Height (world z, m) at which the yellow detection marker is held. The
+    # marker tracks the operator in X/Y but stays at this constant plane height
+    # (== perception_node plane_z_m) instead of following the hand's vertical
+    # reach, so the single overhead camera recovers the planar (x, y) with no
+    # parallax and the perceived 'human' TF tracks the operator across the whole
+    # path. The true 3-D hand pose is still published on world->human_gt.
+    _MARKER_Z: float = APPROACH_Z  # 0.95 m — must equal perception plane_z_m
+
+    def __init__(self) -> None:
+        super().__init__("human_node")
+
+        # path_seed: integer ROS param for reproducible operator paths.
+        # seed <= 0  → unseeded Random (non-deterministic, default for live demo).
+        # seed > 0   → seeded Random(seed) — deterministic for scenario/AT tests.
+        # The parameter may arrive as a string from launch args (LaunchConfiguration
+        # substitution), so we coerce it to int defensively.
+        _seed_val = self.declare_parameter("path_seed", 0).value
+        if not isinstance(_seed_val, int):
+            try:
+                _seed_val = int(_seed_val)
+            except (TypeError, ValueError):
+                _seed_val = 0
+        # random.Random(None) seeds from OS entropy — identical to Random().
+        self._rng = random.Random(_seed_val if _seed_val > 0 else None)
+
+        path = OperatorPath.generate_random(self._rng)
+        self._model = OperatorModel(path)
+        self._br = TransformBroadcaster(self)
+        self._start_time: Optional[float] = None
+
+        # Initialise gz transport node for pose following if bindings available.
+        self._gz_node = _GzTransportNode() if _GzTransportNode is not None else None
+
+        # Operator-body pose following runs on a BACKGROUND THREAD, never on the
+        # ROS timer. gz.transport13's request() is synchronous and, under sim
+        # load, can block for far longer than its timeout; calling it from
+        # _tick() stalled the whole node — freezing the 50 Hz world->human_gt
+        # broadcast AND the marker for seconds at a time (perception then saw a
+        # frozen operator). The timer now only publishes the latest target pose
+        # into _gz_target; the worker drains it best-effort, so a slow set_pose
+        # can never stall path advancement or the TF broadcast.
+        self._gz_target: Optional[Tuple[float, float, float]] = None
+        self._gz_target_lock = threading.Lock()
+        self._gz_worker: Optional[threading.Thread] = None
+        if self._gz_node is not None:
+            self._gz_worker = threading.Thread(target=self._gz_pose_worker, daemon=True)
+            self._gz_worker.start()
+
+        self._timer = self.create_timer(1.0 / self._TIMER_HZ, self._tick)
+        self.get_logger().info(
+            "[human_node] started; broadcasting world -> human_gt at "
+            f"{self._TIMER_HZ:.0f} Hz"
+        )
+        if self._gz_node is not None:
+            self.get_logger().info(
+                "[human_node] gz transport available; operator body will "
+                "track the path at 30 Hz via /world/empty/set_pose"
+            )
+        else:
+            self.get_logger().warning(
+                "[human_node] gz.transport13 not available "
+                "(python3-gz-transport13 / python3-gz-msgs10 not installed?); "
+                "operator body stays at spawn position — camera detection may fail"
+            )
+
+    def _tick(self) -> None:
+        """Timer callback: advance the operator, broadcast TF, update gz pose."""
+        now = self.get_clock().now()
+        now_s = now.nanoseconds * 1e-9
+
+        if self._start_time is None:
+            self._start_time = now_s
+
+        t = now_s - self._start_time
+
+        # Regenerate path when current one is complete
+        if self._model.is_complete(t):
+            new_path = OperatorPath.generate_random(self._rng)
+            self._model.path = new_path
+            self._start_time = now_s
+            t = 0.0
+            self.get_logger().debug("[human_node] new operator path generated")
+
+        x, y, z = self._model.position_at(t)
+
+        # Broadcast the ground-truth TF (50 Hz)
+        tf_msg = TransformStamped()
+        tf_msg.header.stamp = now.to_msg()
+        tf_msg.header.frame_id = self._WORLD_FRAME
+        tf_msg.child_frame_id = self._GT_FRAME
+        tf_msg.transform.translation.x = x
+        tf_msg.transform.translation.y = y
+        tf_msg.transform.translation.z = z
+        tf_msg.transform.rotation.w = 1.0  # no rotation for the hand point
+        self._br.sendTransform(tf_msg)
+
+        # Publish the latest target for the background pose-following worker.
+        # Hold the marker at the constant perception plane height (see _MARKER_Z),
+        # not the reaching hand's z, so the recovered planar pose is parallax-free.
+        # Cheap non-blocking store; the (possibly slow) set_pose runs on the worker.
+        if self._gz_node is not None:
+            with self._gz_target_lock:
+                self._gz_target = (x, y, self._MARKER_Z)
+
+    def _gz_pose_worker(self) -> None:
+        """Background loop: push the latest target pose to gz, off the timer.
+
+        Drains ``_gz_target`` at ~30 Hz and calls the synchronous (possibly slow)
+        gz ``set_pose`` service here so it can never stall the ROS timer that
+        advances the path and broadcasts the ground-truth TF.
+        """
+        while rclpy.ok():
+            with self._gz_target_lock:
+                target = self._gz_target
+            if target is not None:
+                self._set_gz_pose(*target)
+            time.sleep(0.033)  # ~30 Hz best-effort; off the ROS timer, so the
+            # extra gz-service traffic can't stall path advancement or the TF.
+
+    def _set_gz_pose(self, x: float, y: float, z: float) -> None:
+        """Move the yellow operator gz entity to ``(x, y, z)`` via set_pose.
+
+        Runs on the background worker thread (see _gz_pose_worker). Failures are
+        logged at DEBUG only — the entity may not have spawned yet in the first
+        few ticks, which is expected and harmless.
+        """
+        try:
+            pose_msg = _GzPose()
+            pose_msg.name = self._GZ_ENTITY_NAME
+            pose_msg.position.x = x
+            pose_msg.position.y = y
+            pose_msg.position.z = z
+            pose_msg.orientation.w = 1.0
+            # gz.transport13.request(service, request, request_type, response_type,
+            # timeout_ms). The request_type (_GzPose) is REQUIRED — omitting it
+            # raises TypeError, which the except below would swallow, leaving the
+            # body frozen. (That was the original bug.)
+            self._gz_node.request(
+                self._GZ_SET_POSE_SVC,
+                pose_msg,
+                _GzPose,
+                _GzBoolean,
+                100,  # ms; on the worker thread, so a slow call only delays the
+                # next marker update, never the ROS timer / TF broadcast.
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().debug(
+                f"[human_node] gz set_pose failed (entity not yet spawned?): {exc}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Entry point for `ros2 run safecollab human_node`
 # ---------------------------------------------------------------------------
 
 
 def main(args=None):  # pragma: no cover
-    """Entry point for the ``human_node`` ROS 2 executable.
-
-    All ROS imports are deferred to here so that importing this module in a
-    plain-Python test environment (no ROS) does not raise ``ImportError``.
-
-    The node broadcasts the **ground-truth** TF ``world → human_gt`` at 50 Hz.
-    The frame is named ``human_gt`` (not ``human``) to distinguish it from the
-    *perceived* ``world → human`` TF published by ``perception_node``; the safety
-    monitor consumes only the perceived TF.
-
-    Gz-transport pose following
-    ---------------------------
-    In addition to broadcasting the TF, this node moves the yellow operator
-    visual body (spawned from ``urdf/operator.sdf`` by ``cell.launch.py``) by
-    calling the gz sim service ``/world/empty/set_pose`` via the
-    ``gz.transport13`` Python bindings.  This closes the perception loop:
-    the overhead camera sees the yellow body and ``perception_node`` can
-    detect the operator without requiring a physical person in the scene.
-
-    The X/Y of the marker tracks the operator path; its z is held constant at
-    ``_MARKER_Z`` (== ``perception_node`` ``plane_z_m``) so the camera-recovered
-    planar pose is parallax-free (see ``_MARKER_Z``).
-
-    The ``set_pose`` call runs on a **background worker thread**, never on the
-    ROS timer.  ``gz.transport13.Node.request()`` is synchronous and, under sim
-    load, can block for far longer than its timeout; calling it from the 50 Hz
-    timer stalled the node and froze both the ``human_gt`` broadcast and the
-    marker for seconds.  The timer now only stores the latest target pose; the
-    worker drains it best-effort, so a slow ``set_pose`` can never stall path
-    advancement or the TF broadcast.
-
-    The gz-transport import is guarded: if ``python3-gz-transport13`` /
-    ``python3-gz-msgs10`` are absent the node still functions correctly —
-    the TF broadcast is unaffected, and only the visual body tracking is
-    disabled (body stays at its spawn-time position).  This makes the node
-    safe to start in environments where gz Python bindings are not installed.
-
-    Why gz transport (not a ROS bridge)?
-    * The gz ``/world/*/set_pose`` service is a gz-transport-only endpoint;
-      no standard ``ros_gz_bridge`` service bridge exists for it, so a
-      ROS-service approach would need custom bridge configuration.
-    * Works headless: gz transport is pure middleware with no display
-      dependency.
-    """
-    import rclpy
-    from geometry_msgs.msg import TransformStamped
-    from rclpy.node import Node
-    from tf2_ros import TransformBroadcaster
-
-    # ------------------------------------------------------------------
-    # Optional gz transport bindings for operator body pose following.
-    # gz Harmonic ships gz-transport 13 and gz-msgs 10.
-    # Package names (Ubuntu 24.04 OSRF apt repo):
-    #   python3-gz-transport13  →  gz.transport13
-    #   python3-gz-msgs10       →  gz.msgs10.pose_pb2 / gz.msgs10.boolean_pb2
-    # These are listed as explicit apt deps in the Dockerfile.  If they are
-    # absent the except branch runs and pose following is silently disabled.
-    # ------------------------------------------------------------------
-    _GzTransportNode = None
-    _GzPose = None
-    _GzBoolean = None
-    try:
-        from gz.transport13 import Node as _GzTransportNode  # type: ignore[import]
-        from gz.msgs10.pose_pb2 import Pose as _GzPose  # type: ignore[import]
-        from gz.msgs10.boolean_pb2 import Boolean as _GzBoolean  # type: ignore[import]
-    except ImportError:
-        pass  # gz Python bindings not installed; visual body tracking disabled
-
-    class HumanNode(Node):
-        """ROS 2 wrapper around ``OperatorModel``.
-
-        Generates a random ``OperatorPath`` at start-up, then replaces it with a
-        fresh random path each time the current path completes.  Broadcasts the
-        ground-truth ``world → human_gt`` TF at 50 Hz and moves the yellow gz
-        operator entity at 30 Hz so perception_node can detect it.
-        """
-
-        _GT_FRAME = "human_gt"
-        _WORLD_FRAME = "world"
-        _TIMER_HZ = 50.0
-
-        # gz transport pose-following constants
-        _GZ_SET_POSE_SVC: str = "/world/empty/set_pose"
-        _GZ_ENTITY_NAME: str = "operator"
-
-        # Height (world z, m) at which the yellow detection marker is held.
-        # The marker tracks the operator in X/Y but stays at a constant working
-        # height instead of following the hand's vertical reach (0.82..1.10).
-        # Why: the single overhead camera recovers the operator's *planar* (x, y)
-        # position by back-projecting the blob centroid onto one plane
-        # (perception_node plane_z_m). Keeping the marker at exactly that plane
-        # height makes the recovered X/Y match the true X/Y with no parallax —
-        # so the perceived 'human' TF tracks the operator across the whole path,
-        # not just during a tray reach. 0.95 m == APPROACH_Z, the operator's
-        # dominant working height, which also keeps the 3-D residual against the
-        # (vertically reaching) human_gt small everywhere. The true 3-D hand
-        # pose is still published faithfully on the world->human_gt TF.
-        _MARKER_Z: float = APPROACH_Z  # 0.95 m — must equal perception plane_z_m
-
-        def __init__(self) -> None:
-            super().__init__("human_node")
-
-            # path_seed: integer ROS param for reproducible operator paths.
-            # seed <= 0  → unseeded Random (non-deterministic, default for live demo).
-            # seed > 0   → seeded Random(seed) — deterministic for scenario/AT tests.
-            # The parameter may arrive as a string from launch args (LaunchConfiguration
-            # substitution), so we coerce it to int defensively.
-            _seed_val = self.declare_parameter("path_seed", 0).value
-            if not isinstance(_seed_val, int):
-                try:
-                    _seed_val = int(_seed_val)
-                except (TypeError, ValueError):
-                    _seed_val = 0
-            # random.Random(None) seeds from OS entropy — identical to Random().
-            self._rng = random.Random(_seed_val if _seed_val > 0 else None)
-
-            path = OperatorPath.generate_random(self._rng)
-            self._model = OperatorModel(path)
-            self._br = TransformBroadcaster(self)
-            self._start_time: Optional[float] = None
-
-            # Initialise gz transport node for pose following if bindings available.
-            self._gz_node = _GzTransportNode() if _GzTransportNode is not None else None
-
-            # Operator-body pose following runs on a BACKGROUND THREAD, never on
-            # the ROS timer. gz.transport13's request() is synchronous and, under
-            # sim load, can block for far longer than its timeout; calling it from
-            # _tick() stalled the whole node — freezing the 50 Hz world->human_gt
-            # broadcast AND the marker for seconds at a time (perception then saw a
-            # frozen operator). The timer now only publishes the latest target
-            # pose into _gz_target; the worker drains it best-effort, so a slow
-            # set_pose can never stall path advancement or the TF broadcast.
-            self._gz_target: Optional[Tuple[float, float, float]] = None
-            self._gz_target_lock = threading.Lock()
-            self._gz_worker: Optional[threading.Thread] = None
-            if self._gz_node is not None:
-                self._gz_worker = threading.Thread(
-                    target=self._gz_pose_worker, daemon=True
-                )
-                self._gz_worker.start()
-
-            self._timer = self.create_timer(1.0 / self._TIMER_HZ, self._tick)
-            self.get_logger().info(
-                "[human_node] started; broadcasting world -> human_gt at "
-                f"{self._TIMER_HZ:.0f} Hz"
-            )
-            if self._gz_node is not None:
-                self.get_logger().info(
-                    "[human_node] gz transport available; operator body will "
-                    "track the path at 30 Hz via /world/empty/set_pose"
-                )
-            else:
-                self.get_logger().warning(
-                    "[human_node] gz.transport13 not available "
-                    "(python3-gz-transport13 / python3-gz-msgs10 not installed?); "
-                    "operator body stays at spawn position — camera detection may fail"
-                )
-
-        def _tick(self) -> None:
-            """Timer callback: advance the operator, broadcast TF, update gz pose."""
-            now = self.get_clock().now()
-            now_s = now.nanoseconds * 1e-9
-
-            if self._start_time is None:
-                self._start_time = now_s
-
-            t = now_s - self._start_time
-
-            # Regenerate path when current one is complete
-            if self._model.is_complete(t):
-                new_path = OperatorPath.generate_random(self._rng)
-                self._model.path = new_path
-                self._start_time = now_s
-                t = 0.0
-                self.get_logger().debug("[human_node] new operator path generated")
-
-            x, y, z = self._model.position_at(t)
-
-            # Broadcast the ground-truth TF (50 Hz — unchanged from before)
-            tf_msg = TransformStamped()
-            tf_msg.header.stamp = now.to_msg()
-            tf_msg.header.frame_id = self._WORLD_FRAME
-            tf_msg.child_frame_id = self._GT_FRAME
-            tf_msg.transform.translation.x = x
-            tf_msg.transform.translation.y = y
-            tf_msg.transform.translation.z = z
-            tf_msg.transform.rotation.w = 1.0  # no rotation for the hand point
-            self._br.sendTransform(tf_msg)
-
-            # Publish the latest target for the background pose-following worker.
-            # Track the operator in X/Y but hold the marker at the constant
-            # perception plane height (see _MARKER_Z) — not the reaching hand's
-            # z — so the camera-recovered planar pose is parallax-free. This is a
-            # cheap, non-blocking store; the actual (potentially slow) set_pose
-            # call happens on the worker thread, off the timer.
-            if self._gz_node is not None:
-                with self._gz_target_lock:
-                    self._gz_target = (x, y, self._MARKER_Z)
-
-        def _gz_pose_worker(self) -> None:
-            """Background loop: push the latest target pose to gz, off the timer.
-
-            Drains ``_gz_target`` at ~30 Hz and calls the synchronous (possibly
-            slow) gz ``set_pose`` service here so it can never stall the ROS timer
-            that advances the path and broadcasts the ground-truth TF.
-            """
-            import rclpy as _rclpy  # local: same guarded ROS dependency as main()
-
-            while _rclpy.ok():
-                target = None
-                with self._gz_target_lock:
-                    target = self._gz_target
-                if target is not None:
-                    self._set_gz_pose(*target)
-                time.sleep(0.033)  # ~30 Hz best-effort — smoother visual operator
-                # tracking. On a background thread (never the ROS timer), so the extra
-                # gz-service calls can't stall path advancement or the 50 Hz TF; the
-                # cost is only a little more gz-transport traffic.
-
-        def _set_gz_pose(self, x: float, y: float, z: float) -> None:
-            """Move the yellow operator gz entity to ``(x, y, z)`` via set_pose.
-
-            Runs on the background worker thread (see _gz_pose_worker). Calls the
-            gz sim service ``/world/empty/set_pose``.  Failures are logged at
-            DEBUG level only — the entity may not have been spawned yet in the
-            first few ticks, and that is expected and harmless.
-            """
-            try:
-                pose_msg = _GzPose()
-                pose_msg.name = self._GZ_ENTITY_NAME
-                pose_msg.position.x = x
-                pose_msg.position.y = y
-                pose_msg.position.z = z
-                pose_msg.orientation.w = 1.0
-                # gz.transport13 signature:
-                #   request(service, request, request_type, response_type, timeout_ms)
-                # The request_type (_GzPose) is REQUIRED — omitting it raises
-                # TypeError, which the except below would silently swallow, so the
-                # operator body would never move. (This was the original bug.)
-                self._gz_node.request(
-                    self._GZ_SET_POSE_SVC,
-                    pose_msg,
-                    _GzPose,
-                    _GzBoolean,
-                    100,  # ms; on the worker thread, so a slow call only delays
-                    # the next marker update, never the ROS timer / TF broadcast.
-                )
-            except Exception as exc:  # noqa: BLE001
-                self.get_logger().debug(
-                    f"[human_node] gz set_pose failed (entity not yet spawned?): {exc}"
-                )
-
+    """Entry point for the ``human_node`` ROS 2 executable."""
+    if not _HAS_ROS:
+        raise RuntimeError(
+            "rclpy is not available — human_node requires a ROS 2 environment."
+        )
     rclpy.init(args=args)
     node = HumanNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    except RuntimeError as exc:
-        # Teardown race: rclpy's executor can raise from take_message (e.g. on
-        # the /clock subscription that use_sim_time creates) if it is mid-take
-        # when the SIGINT handler shuts the context down. It surfaces as a pybind
-        # "Unable to convert call argument" error from _take_subscription.
-        # rclpy.ok() is an unreliable discriminator (it can still report True for
-        # a tick during teardown), so also treat that specific take-time error as
-        # benign; re-raise anything else so real bugs still surface.
-        if rclpy.ok() and "convert call argument" not in str(exc):
-            raise
-    finally:
-        node.destroy_node()
-        # On SIGINT, rclpy's default signal handler already shuts the context
-        # down; calling rclpy.shutdown() again raises RCLError. Guard with ok().
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_and_shutdown(node)
 
 
 if __name__ == "__main__":  # pragma: no cover
