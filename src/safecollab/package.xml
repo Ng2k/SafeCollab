@@ -2,12 +2,12 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>safecollab</name>
-  <version>0.1.0</version>
+  <version>0.7.0</version>
   <description>
     A perception-driven, human-aware collaborative kitting cell implementing
     ISO/TS 15066 Speed-and-Separation Monitoring (SSM) on ROS 2 Jazzy + gz sim.
   </description>
-  <maintainer email="TODO@example.com">Nicola</maintainer>
+  <maintainer email="nicola.ng2k@gmail.com">Nicola Guerra</maintainer>
   <license>TODO</license>
 
   <buildtool_depend>ament_python</buildtool_depend>

@@ -25,11 +25,8 @@ Fail-safe (FR-9, AGENTS.md §1 / §6 Stream F card):
   ``("lost", 0.0)`` — a protective stop.  The last known position is NEVER
   assumed still valid ("no dead-reckoning" property).
 
-Live integration note:
-  ``perception_node`` (Stream C) is NOT yet merged.  The ROS wrapper's TF lookup
-  for ``world → human`` and the ``/human/uncertainty`` subscriber are written
-  against the §3 contract but cannot be verified end-to-end until Stream C lands.
-  The pure-Python ``SafetyMonitorLogic`` is fully unit-tested with stub data.
+The ``world → human`` TF and ``/human/uncertainty`` come from ``perception_node``.
+The pure-Python ``SafetyMonitorLogic`` is fully unit-tested with stub data.
 """
 
 from __future__ import annotations
@@ -337,9 +334,8 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
         ``/safety/min_distance`` (std_msgs/Float32)
         ``/viz/safety_marker``   (visualization_msgs/Marker)
 
-    Live integration with ``perception_node`` (Stream C) is required for the
-    ``world → human`` TF to be available.  Until Stream C is merged, the node
-    starts but publishes ``lost`` on every tick (fail-safe default).
+    The ``world → human`` TF comes from ``perception_node``; while it is missing
+    or stale the node publishes ``lost`` (the fail-safe default).
     """
 
     _WORLD_FRAME = "world"

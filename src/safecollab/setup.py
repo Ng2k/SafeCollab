@@ -7,7 +7,7 @@ package_name = "safecollab"
 
 setup(
     name=package_name,
-    version="0.1.0",
+    version="0.7.0",
     packages=find_packages(exclude=["test", "test.*"]),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
@@ -44,8 +44,8 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    maintainer="Nicola",
-    maintainer_email="TODO@example.com",
+    maintainer="Nicola Guerra",
+    maintainer_email="nicola.ng2k@gmail.com",
     description="SafeCollab: a perception-driven, human-aware collaborative kitting cell "
     "implementing ISO/TS 15066 Speed-and-Separation Monitoring.",
     license="TODO",

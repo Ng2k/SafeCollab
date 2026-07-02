@@ -14,22 +14,16 @@ Interface contract (AGENTS.md §3):
   Publishes:   /human/uncertainty         (std_msgs/Float32, σ in metres)
   Broadcasts:  TF world → human           (perceived, NOT ground truth)
 
-Stream C "Must" requirements (AGENTS.md §6):
+Requirements (AGENTS.md §6):
   - Detection latency ≤ 100 ms (node processes one frame per callback).
   - σ grows on noisier / ambiguous detections (feeds Z_d in the risk model).
   - Loss timeout → downstream sees ``lost`` (TF goes stale; safety monitor
     treats a stale TF the same as ``d is None → "lost", 0.0``).
 
-Live-camera dependency note
----------------------------
-The ``ros_gz_image`` bridge that feeds ``/camera/image`` with real Gazebo
-frames is **BLOCKED on Stream G's ``cell.launch.py``**, which does not yet
-exist (as of this PR).  The ``PerceptionNode`` ROS wrapper is implemented
-against the documented topic/message contract (§3) and will wire up
-automatically once Stream G provides the bridge.  Until then, the pure-Python
-geometry (``back_project``, ``transform_point``, ``estimate_uncertainty``) and
-the state machine (``PerceptionLogic``) are fully exercised by the unit tests
-in ``test/unit/test_perception_geom.py``.
+``/camera/image`` is fed by the ``ros_gz_image`` bridge wired in
+``launch/cell.launch.py``. The pure-Python geometry (``back_project``,
+``transform_point``, ``estimate_uncertainty``) and the state machine
+(``PerceptionLogic``) are exercised by ``test/unit/test_perception_geom.py``.
 """
 
 from __future__ import annotations
@@ -593,12 +587,9 @@ class PerceptionNode(Node):  # type: ignore[misc]  # pragma: no cover
     Broadcasts:
         TF world → human           (perceived position; safety_monitor uses this)
 
-    Live-camera note:
-        The ``ros_gz_image`` bridge for ``/camera/image`` is provided by
-        ``launch/cell.launch.py`` (Stream G).  Until that file exists, this
-        node will start but receive no images.  The loss-timeout timer will
-        immediately set ``is_lost=True``, which causes the safety monitor to
-        enter the fail-safe ``lost`` state — the correct and safe behaviour.
+    If no images arrive, the loss-timeout timer sets ``is_lost=True``, which
+    drives the safety monitor into its fail-safe ``lost`` state — the correct
+    and safe behaviour.
     """
 
     _WORLD_FRAME: str = "world"
