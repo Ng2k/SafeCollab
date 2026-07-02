@@ -17,7 +17,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
-P6 — documentation & finalisation (toward `v0.6.0`); see `docs/ROADMAP-P6.md`.
+_Nothing yet._
+
+---
+
+## [0.6.0] - 2026-07-02 — P6: documentation & finalisation
+
+The final documentation set required by the Definition of Done (§12.6): a
+built-out README, an architecture diagram, and an ISO/TS 15066 risk note — each
+consistent with the build. Closes P6 ahead of the P7 clean-machine dry-run and
+the `v1.0.0` submission.
 
 ### Added
 
