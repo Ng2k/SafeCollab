@@ -9,6 +9,8 @@ It runs in the `safecollab:demo` Docker image with X11 passthrough, the same way
 as [`VALIDATE.md`](VALIDATE.md) §5, so it works on Arch / Omarchy under Hyprland
 (XWayland). One script brings up everything.
 
+![SafeCollab SSM demo — UR5e kitting under ISO/TS 15066 speed scaling, with a protective stop and a fail-safe re-acquire](media/safecollab-demo.gif)
+
 ---
 
 ## 1. What you will see
