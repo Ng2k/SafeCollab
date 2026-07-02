@@ -39,16 +39,17 @@ import numpy as np
 try:
     import rclpy  # pragma: no cover
     from rclpy.node import Node  # pragma: no cover
-    from rclpy.qos import (  # pragma: no cover
-        HistoryPolicy,
-        QoSProfile,
-        ReliabilityPolicy,
-    )
     from cv_bridge import CvBridge  # pragma: no cover
     from geometry_msgs.msg import TransformStamped  # pragma: no cover
     from sensor_msgs.msg import Image  # pragma: no cover
     from std_msgs.msg import Float32  # pragma: no cover
     from tf2_ros import TransformBroadcaster  # pragma: no cover
+
+    from safecollab._ros_runtime import (  # pragma: no cover
+        best_effort_qos,
+        reliable_qos,
+        spin_and_shutdown,
+    )
 
     _HAS_ROS = True  # pragma: no cover
 except ImportError:
@@ -640,28 +641,17 @@ class PerceptionNode(Node):  # type: ignore[misc]  # pragma: no cover
         self._bridge = CvBridge()
         self._br = TransformBroadcaster(self)
 
-        _reliable = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10,
-        )
-        _sensor = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-        )
-
         self._pub_uncertainty = self.create_publisher(
             Float32,
             "/human/uncertainty",
-            _reliable,
+            reliable_qos(),
         )
 
         self.create_subscription(
             Image,
             "/camera/image",
             self._on_image,
-            _sensor,
+            best_effort_qos(depth=1),
         )
 
         self._timer = self.create_timer(1.0 / self._TIMER_HZ, self._tick)
@@ -762,23 +752,4 @@ def main(args: list | None = None) -> None:  # pragma: no cover
         )
     rclpy.init(args=args)
     node = PerceptionNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    except RuntimeError as exc:
-        # Teardown race: rclpy's executor can raise from take_message (e.g. on
-        # the /clock subscription that use_sim_time creates) if it is mid-take
-        # when the SIGINT handler shuts the context down. It surfaces as a pybind
-        # "Unable to convert call argument" error from _take_subscription.
-        # rclpy.ok() is an unreliable discriminator (it can still report True for
-        # a tick during teardown), so also treat that specific take-time error as
-        # benign; re-raise anything else so real bugs still surface.
-        if rclpy.ok() and "convert call argument" not in str(exc):
-            raise
-    finally:
-        node.destroy_node()
-        # On SIGINT, rclpy's default signal handler already shuts the context
-        # down; calling rclpy.shutdown() again raises RCLError. Guard with ok().
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_and_shutdown(node)

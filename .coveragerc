@@ -1,0 +1,12 @@
+# Coverage config for the SafeCollab unit gate (pytest --cov=safecollab).
+#
+# _ros_runtime.py is ROS-only lifecycle glue: it imports rclpy at module load
+# and is imported only from inside each node's `try: import rclpy` guard, so it
+# is never imported in the pure-Python unit environment. It is exercised live by
+# the integration/scenario launch_test suites — the same status as the
+# `# pragma: no cover` ROS node wrappers, which coverage can only exclude
+# per-block because their modules ARE imported. A never-imported module can only
+# be excluded here, at the file level.
+[run]
+omit =
+    */safecollab/_ros_runtime.py

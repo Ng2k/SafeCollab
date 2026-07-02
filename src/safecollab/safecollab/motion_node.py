@@ -59,11 +59,6 @@ def load_motion_config(path) -> SimpleNamespace:
 try:
     import rclpy  # pragma: no cover
     from rclpy.node import Node  # pragma: no cover
-    from rclpy.qos import (
-        QoSProfile,
-        ReliabilityPolicy,
-        HistoryPolicy,
-    )  # pragma: no cover
     from builtin_interfaces.msg import Duration  # pragma: no cover
     from sensor_msgs.msg import JointState  # pragma: no cover
     from std_msgs.msg import Float32  # pragma: no cover
@@ -71,6 +66,12 @@ try:
         JointTrajectory,
         JointTrajectoryPoint,
     )  # pragma: no cover
+
+    from safecollab._ros_runtime import (  # pragma: no cover
+        config_path,
+        reliable_qos,
+        spin_and_shutdown,
+    )
 
     _HAS_ROS = True  # pragma: no cover
 except ImportError:
@@ -413,42 +414,31 @@ class MotionNode(Node):  # type: ignore[misc]  # pragma: no cover
     def __init__(self) -> None:
         super().__init__("motion_node")  # type: ignore[call-arg]
 
-        # Config knobs live next to the package (colcon install + editable layout
-        # both put config/ next to safecollab/), same idiom as safety_monitor
-        # (ground rule 5). _here is the package dir; config/ is beside it.
-        from pathlib import Path
-
-        _here = Path(__file__).resolve().parent
-        motion_cfg = load_motion_config(_here.parent / "config" / "motion.yaml")
+        # Config knobs live next to the package (ground rule 5).
+        motion_cfg = load_motion_config(config_path("motion.yaml"))
         self._logic = MotionLogic(
             republish_scale_epsilon=motion_cfg.republish_scale_epsilon,
             hold_time_s=motion_cfg.hold_time_s,
         )
 
-        _reliable = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10,
-        )
-
         self._pub = self.create_publisher(
             JointTrajectory,
             "/arm_controller/joint_trajectory",
-            _reliable,
+            reliable_qos(),
         )
 
         self.create_subscription(
             JointTrajectory,
             "/motion/nominal_trajectory",
             self._on_nominal_trajectory,
-            _reliable,
+            reliable_qos(),
         )
 
         self.create_subscription(
             Float32,
             "/safety/scale",
             self._on_scale,
-            _reliable,
+            reliable_qos(),
         )
 
         self.create_subscription(
@@ -537,23 +527,4 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
         )
     rclpy.init(args=args)
     node = MotionNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    except RuntimeError as exc:
-        # Teardown race: rclpy's executor can raise from take_message (e.g. on
-        # the /clock subscription that use_sim_time creates) if it is mid-take
-        # when the SIGINT handler shuts the context down. It surfaces as a pybind
-        # "Unable to convert call argument" error from _take_subscription.
-        # rclpy.ok() is an unreliable discriminator (it can still report True for
-        # a tick during teardown), so also treat that specific take-time error as
-        # benign; re-raise anything else so real bugs still surface.
-        if rclpy.ok() and "convert call argument" not in str(exc):
-            raise
-    finally:
-        node.destroy_node()
-        # On SIGINT, rclpy's default signal handler already shuts the context
-        # down; calling rclpy.shutdown() again raises RCLError. Guard with ok().
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_and_shutdown(node)

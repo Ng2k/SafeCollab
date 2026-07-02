@@ -114,13 +114,15 @@ def load_hud_config(path) -> SimpleNamespace:
 try:
     import rclpy  # pragma: no cover
     from rclpy.node import Node  # pragma: no cover
-    from rclpy.qos import (  # pragma: no cover
-        DurabilityPolicy,
-        HistoryPolicy,
-        QoSProfile,
-        ReliabilityPolicy,
-    )
     from std_msgs.msg import Float32, String  # pragma: no cover
+
+    from safecollab._ros_runtime import (  # pragma: no cover
+        best_effort_qos,
+        config_path,
+        reliable_qos,
+        spin_and_shutdown,
+        transient_qos,
+    )
 
     _HAS_ROS = True  # pragma: no cover
 except ImportError:
@@ -134,8 +136,7 @@ class HudNode(Node):  # type: ignore[misc]  # pragma: no cover
     def __init__(self) -> None:
         super().__init__("hud_node")  # type: ignore[call-arg]
 
-        _here = Path(__file__).resolve().parent
-        cfg = load_hud_config(_here.parent / "config" / "hud.yaml")
+        cfg = load_hud_config(config_path("hud.yaml"))
         self._colours = build_colour_map(cfg.colours) if cfg.use_colour else None
 
         # Fail-safe defaults until the first messages arrive.
@@ -144,27 +145,12 @@ class HudNode(Node):  # type: ignore[misc]  # pragma: no cover
         self._min_distance: Optional[float] = None
 
         # QoS matched to each topic's §3 contract (same as safety_monitor pubs).
-        _reliable = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10,
-        )
-        _transient = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-        )
-        _best_effort = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10,
-        )
-
-        self.create_subscription(String, "/safety/zone", self._on_zone, _transient)
-        self.create_subscription(Float32, "/safety/scale", self._on_scale, _reliable)
+        self.create_subscription(String, "/safety/zone", self._on_zone, transient_qos())
         self.create_subscription(
-            Float32, "/safety/min_distance", self._on_distance, _best_effort
+            Float32, "/safety/scale", self._on_scale, reliable_qos()
+        )
+        self.create_subscription(
+            Float32, "/safety/min_distance", self._on_distance, best_effort_qos()
         )
 
         self.create_timer(1.0 / cfg.refresh_hz, self._render)
@@ -203,17 +189,5 @@ def main(args: list | None = None) -> None:  # pragma: no cover
         )
     rclpy.init(args=args)
     node = HudNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    except RuntimeError as exc:
-        # Same benign teardown race guard as the other nodes: the executor can
-        # raise from take_message if mid-take when SIGINT shuts the context down.
-        if rclpy.ok() and "convert call argument" not in str(exc):
-            raise
-    finally:
-        print()  # end the in-place HUD line with a newline on shutdown
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    # on_shutdown ends the in-place HUD line with a newline.
+    spin_and_shutdown(node, on_shutdown=lambda: print())

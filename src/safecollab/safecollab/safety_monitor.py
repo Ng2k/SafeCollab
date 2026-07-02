@@ -49,15 +49,17 @@ from safecollab.safety_logic import classify
 try:
     import rclpy  # pragma: no cover
     from rclpy.node import Node  # pragma: no cover
-    from rclpy.qos import (  # pragma: no cover
-        DurabilityPolicy,
-        HistoryPolicy,
-        QoSProfile,
-        ReliabilityPolicy,
-    )
     from std_msgs.msg import Float32, String  # pragma: no cover
     from tf2_ros import Buffer, TransformListener  # pragma: no cover
     from visualization_msgs.msg import Marker  # pragma: no cover
+
+    from safecollab._ros_runtime import (  # pragma: no cover
+        best_effort_qos,
+        config_path,
+        reliable_qos,
+        spin_and_shutdown,
+        transient_qos,
+    )
 
     _HAS_ROS = True  # pragma: no cover
 except ImportError:
@@ -371,14 +373,8 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
             f"→ TF frame '{self._HUMAN_FRAME}'"
         )
 
-        # Resolve config paths relative to this file (colcon install layout
-        # and local editable install both put config/ next to safecollab/).
-        _here = Path(__file__).resolve().parent
-        _risk_yaml = _here.parent / "config" / "risk.yaml"
-        _safety_yaml = _here.parent / "config" / "safety.yaml"
-
-        risk_cfg = load_risk_config(_risk_yaml)
-        safety_cfg = load_safety_config(_safety_yaml)
+        risk_cfg = load_risk_config(config_path("risk.yaml"))
+        safety_cfg = load_safety_config(config_path("safety.yaml"))
         self._logic = SafetyMonitorLogic(risk_cfg, safety_cfg)
         self._robot_frames: List[str] = safety_cfg.robot_frames
 
@@ -389,32 +385,16 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
-        # QoS profiles
-        _reliable = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10,
+        # Publishers (§3 contract) — QoS matched per topic.
+        self._scale_pub = self.create_publisher(
+            Float32, "/safety/scale", reliable_qos()
         )
-        _transient = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-        )
-        _best_effort = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10,
-        )
-
-        # Publishers (§3 contract)
-        self._scale_pub = self.create_publisher(Float32, "/safety/scale", _reliable)
-        self._zone_pub = self.create_publisher(String, "/safety/zone", _transient)
+        self._zone_pub = self.create_publisher(String, "/safety/zone", transient_qos())
         self._dist_pub = self.create_publisher(
-            Float32, "/safety/min_distance", _best_effort
+            Float32, "/safety/min_distance", best_effort_qos()
         )
         self._marker_pub = self.create_publisher(
-            Marker, "/viz/safety_marker", _best_effort
+            Marker, "/viz/safety_marker", best_effort_qos()
         )
 
         # Subscriber — perception uncertainty
@@ -422,7 +402,7 @@ class SafetyMonitorNode(Node):  # type: ignore[misc]  # pragma: no cover
             Float32,
             "/human/uncertainty",
             self._on_uncertainty,
-            _reliable,
+            reliable_qos(),
         )
 
         # 20 Hz timer — main computation tick
@@ -604,23 +584,4 @@ def main(args: list | None = None) -> None:  # pragma: no cover
         )
     rclpy.init(args=args)
     node = SafetyMonitorNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    except RuntimeError as exc:
-        # Teardown race: rclpy's executor can raise from take_message (e.g. on
-        # the /clock subscription that use_sim_time creates) if it is mid-take
-        # when the SIGINT handler shuts the context down. It surfaces as a pybind
-        # "Unable to convert call argument" error from _take_subscription.
-        # rclpy.ok() is an unreliable discriminator (it can still report True for
-        # a tick during teardown), so also treat that specific take-time error as
-        # benign; re-raise anything else so real bugs still surface.
-        if rclpy.ok() and "convert call argument" not in str(exc):
-            raise
-    finally:
-        node.destroy_node()
-        # On SIGINT, rclpy's default signal handler already shuts the context
-        # down; calling rclpy.shutdown() again raises RCLError. Guard with ok().
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_and_shutdown(node)
