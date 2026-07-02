@@ -17,10 +17,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
-P5 — polish & demo (toward `v0.5.0`); see `docs/ROADMAP-P5.md`.
+_Nothing yet._
+
+---
+
+## [0.5.1] - 2026-07-02 — P5 demo asset
 
 ### Added
 
+- docs(demo): the recorded **perceived-driven demo GIF**
+  (`docs/media/safecollab-demo.gif`) — one `GREEN → YELLOW → RED` protective-stop
+  → resume cycle **and** a detection-loss **fail-safe** (`LOST` → re-acquire, with
+  the terminal narrating the 6 s freeze and recovery). Embedded in `docs/DEMO.md`
+  and the root `README.md` (rewritten from the stub with a project summary + demo
+  pointer); `docs/media/README.md` refreshed. Completes the P5 Definition of Done
+  (§12.5: a protective stop **and** a fail-safe re-acquire), the demo asset the
+  `v0.5.0` tag was cut before.
+
+---
+
+## [0.5.0] - 2026-07-02 — P5: polish & demo + UR5e/MoveIt pick-and-place
+
+RViz zone visualisation, a console safety HUD, and a one-command recorded demo
+make the SSM loop *legible*; the kitting arm is now a real **UR5e** driven by
+**MoveIt/Pilz** planning (retiring the hand-solved cylinder arm). The ISO/TS 15066
+SSM speed-scaling loop is unchanged — MoveIt only generates the nominal
+trajectory; `safety_monitor` → `/safety/scale` → `motion_node` still governs the
+speed. See `docs/ROADMAP-P5.md`.
+
+### Added
+
+- feat(robot): **UR5e + MoveIt/Pilz pick-and-place**, retiring the hand-solved
+  cylinder arm (`urdf/arm.xacro`, `task_node`). The kitting cycle is planned as
+  deterministic Pilz PTP/LIN segments over Cartesian targets (no hand-derived
+  joint poses); the planned dense trajectory flows through the existing
+  `motion_node` retiming, so SSM speed scaling and the AT-1..AT-6 behaviour are
+  preserved unchanged. UR5e model from `ur_description`, driven via
+  `gz_ros2_control`; safety frames retargeted to `tool0` / `wrist_3_link` /
+  `forearm_link`; planning group `ur_manipulator`, EEF `tool0`.
 - feat(viz): **RViz zone visualisation** (P5 sprint 1). `safety_monitor` now also
   publishes a floating `TEXT_VIEW_FACING` zone label (`/viz/safety_marker` id 1,
   e.g. `RED` / `LOST`) above the existing zone sphere (id 0), sharing the single
@@ -87,6 +121,12 @@ P5 — polish & demo (toward `v0.5.0`); see `docs/ROADMAP-P5.md`.
 - fix(human): **smoother operator**. The gz operator body was moved at 10 Hz; raised
   to 30 Hz (background thread, so no impact on the TF broadcast or path advancement)
   for visibly more fluid operator motion.
+- fix(test): **integration bring-up checks the `world -> tool0` TF chain** (the UR5e
+  end-effector), not the retired `tcp` frame of the old arm; the last stale
+  `tcp`/`link_N` references were retired to the UR frames.
+- fix(test): **exit-code harnesses tolerate `parameter_bridge` SIGSEGV** on
+  gz-transport teardown — the same teardown-only artifact already tolerated for
+  SIGABRT (the active bring-up tests have already verified the graph ran).
 
 ---
 

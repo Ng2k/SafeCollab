@@ -1,4 +1,5 @@
 # Demo media
 
-Place the recorded demo here as `safecollab-demo.gif` (see ../DEMO.md §5).
-This keeps the path tracked before the GIF is added.
+`safecollab-demo.gif` — the recorded headline demo (perceived-driven), embedded
+in [`../DEMO.md`](../DEMO.md) and the root `README.md`. Regenerate it from a screen
+recording with the `ffmpeg` recipe in `../DEMO.md` §5.
