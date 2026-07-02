@@ -22,6 +22,8 @@ Interface contract (AGENTS.md §3):
 
 from __future__ import annotations
 
+import math
+import time
 from dataclasses import dataclass
 from typing import Literal
 
@@ -50,15 +52,10 @@ class KittingLeg:
     settle_s: float
 
 
-# World-frame tool0 targets. The tool points straight down at each target; PTP
-# transits move at the higher "above" height, LIN dips/lifts straight into and out
-# of the bin/tray. Targets sit in the UR5e's comfortable reach envelope and match
-# the cell furniture placed in cell.xacro. bin side alternates each cycle.
-# Heights (world z). table_top is 0.74; bins are 0.08 m boxes (top 0.82) and the
-# tray top is 0.78. _PICK_Z=0.78 makes the tool DIP INTO the bin (4 cm below the
-# rim) to grasp, and place ON the tray surface — instead of stopping at the rim /
-# hovering above, which read as "the arm just goes on top and never picks". The
-# raised _ABOVE_Z gives a clearly visible ~0.20 m vertical pick/place stroke.
+# World-frame tool0 target heights (world z). The tool points straight down;
+# _PICK_Z=0.78 dips INTO the bin (4 cm below its 0.82 rim) to grasp and places ON
+# the 0.78 tray surface; the raised _ABOVE_Z gives a visible ~0.20 m pick/place
+# stroke for the PTP transits. Targets match the cell furniture in cell.xacro.
 _ABOVE_Z = 0.98
 _PICK_Z = 0.78
 
@@ -84,13 +81,10 @@ def kitting_legs(bin_side: str) -> list[KittingLeg]:
     by = 0.35 if bin_side == "left" else -0.35
     bx = 0.15
     tx, ty = 0.35, 0.0
-    # settle_s is the dwell AFTER the leg before the next is planned. The DROP
-    # dwell keeps the arm at the shared tray so an operator reach there co-occurs
-    # with the arm and drives a red protective stop (AT-6 needs the escalation to
-    # recur across ≥3 distinct random paths). It no longer has to be LONG: closed-
-    # loop pacing makes the arm WAIT at the tray whenever the operator is close, so
-    # co-occupancy is reliable even with a shorter dwell — which keeps the demo
-    # snappier (the arm isn't parked idle at the tray when the operator is clear).
+    # settle_s is the dwell AFTER the leg before the next is planned. The longer
+    # DROP dwell keeps the arm at the shared tray so an operator reach there
+    # co-occurs with the arm and drives a red protective stop (AT-6 needs the
+    # escalation to recur across ≥3 distinct random paths).
     return [
         KittingLeg(f"GO_TO_BIN_{bin_side.upper()}", "ptp", (bx, by, _ABOVE_Z), 0.4),
         KittingLeg("PICK", "lin", (bx, by, _PICK_Z), 0.6),
@@ -115,9 +109,6 @@ def cycle_sequence(n_cycles: int) -> list[KittingLeg]:
 
 
 def main(args: list[str] | None = None) -> None:  # pragma: no cover
-    import math
-    import time
-
     import rclpy
     from rclpy.node import Node
     from geometry_msgs.msg import PoseStamped
@@ -209,16 +200,13 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
         ) = _DOWN_QUAT
         return p
 
-    # Deterministic IK: KDL is a *non-deterministic* numerical solver, so replanning
-    # each cycle would pick different joint configs — the arm would swing wildly and
-    # sometimes reach toward the operator, making the SSM zone reflect arm motion
-    # instead of operator approach. Instead we resolve each Cartesian target to a
-    # joint config ONCE, seeded from a fixed tucked "elbow-up, tool-down" reference
-    # so the solution is consistent and stays in the arm's own workspace, then cache
-    # it. Every leg is a PTP to the cached JOINT goal — deterministic and reliable.
-    # Tucked "elbow-up, tool-down" reference; shoulder_pan is aimed at each target
-    # so KDL converges to a COMPACT solution (arm over its own workspace) instead of
-    # a contorted reach-around that swings a link toward the operator.
+    # Deterministic IK: KDL is non-deterministic, so re-solving each cycle would
+    # pick different joint configs — the arm would swing and sometimes reach toward
+    # the operator, making the SSM zone reflect arm motion, not operator approach.
+    # Resolve each Cartesian target to a joint config ONCE (seeded from a fixed
+    # tucked "elbow-up, tool-down" reference with shoulder_pan aimed at the target,
+    # so KDL converges to a COMPACT config over the arm's own workspace) and cache
+    # it; every leg is then a PTP to the cached JOINT goal.
     _UR_BASE_XY = (-0.10, 0.0)  # UR base offset on table_top (cell.xacro mount)
     _SEED_TAIL = [-1.2, 1.4, -1.6, -1.57, 0.0]  # lift, elbow, wrist_1/2/3
     _ik_cache: dict[tuple[float, float, float], list[float]] = {}
@@ -301,14 +289,10 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
                     break
                 dur, goal = plan_and_publish(leg)
                 # Closed-loop pacing: wait until the arm actually REACHES the leg
-                # goal before advancing, then apply the settle dwell. wait_until_reached
-                # returns the instant the arm arrives, so a LARGE timeout costs nothing
-                # on a clear (green) cycle — it only bounds how long a BLOCKED leg waits
-                # for the operator to step clear. The bin on the operator's approach
-                # side used to hit the old ~8 s timeout mid-descent and get skipped
-                # (the arm "picked" only one bin); a patient ~15 s budget lets that
-                # PICK/DROP wait the operator out and actually complete the dip, while
-                # green cycles stay just as snappy.
+                # goal, then apply the settle dwell. wait_until_reached returns the
+                # instant the arm arrives, so a LARGE timeout is free on a clear
+                # (green) cycle and only bounds how long a BLOCKED leg waits for the
+                # operator to step clear before completing the pick.
                 if goal is not None:
                     reached = wait_until_reached(
                         goal, timeout_s=max(15.0, dur * 6.0 + 10.0)
