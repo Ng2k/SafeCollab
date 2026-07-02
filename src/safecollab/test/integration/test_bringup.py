@@ -348,6 +348,8 @@ class TestCleanShutdown(unittest.TestCase):
         #                cleanup. This is a teardown-only artifact (the active
         #                bring-up tests already verified the graph ran), not a
         #                bring-up crash.
+        #   -SIGSEGV(-11) same teardown-only artifact: the parameter_bridge can
+        #                also segfault (rather than abort) in gz-transport cleanup.
         # NB: do NOT use launch_testing.asserts.EXIT_SIGINT here — in this
         # version that constant follows the 128+signum shell convention (130),
         # not the -2 that launch actually reports, so it silently excludes the
@@ -360,5 +362,6 @@ class TestCleanShutdown(unittest.TestCase):
                 -signal.SIGINT,
                 -signal.SIGTERM,
                 -signal.SIGABRT,
+                -signal.SIGSEGV,
             ],
         )
