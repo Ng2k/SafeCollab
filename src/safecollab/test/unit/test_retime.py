@@ -7,7 +7,7 @@ division by zero).
 
 import pytest
 
-from safecollab.retime import retime
+from safecollab.motion import retime
 
 
 def test_full_speed_leaves_times_unchanged():

@@ -1,16 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- cell.srdf.xacro — MoveIt semantic description for the SafeCollab cell.
-     The robot name MUST match cell.xacro's <robot name="safecollab_cell">.
-     We reuse ur_moveit_config's ur_srdf macro verbatim: it defines the
-     `ur_manipulator` planning group (chain base_link → tool0), the named UR
-     states, and the UR self-collision disable pairs — all against the standard
-     UR link names, which our cell uses with no tf_prefix.
+<!-- cell.srdf.xacro — MoveIt semantic description. The robot name MUST match
+     cell.xacro's <robot name="safecollab_cell">. Reuses ur_moveit_config's
+     ur_srdf macro verbatim (the `ur_manipulator` group base_link → tool0, named
+     states, and self-collision pairs — standard UR link names, no tf_prefix).
 
-     The static cell furniture (table, bins, tray, camera mast) lives in the same
-     robot_description. We disable collisions between the UR and that furniture so
-     Pilz PTP/LIN planning to the pick/drop poses is not blocked by the arm base
-     resting on the table or the tool hovering just above it; real operator-safety
-     is handled by the SSM loop (safety_monitor), not by MoveIt collision checks. -->
+     The static furniture (table, bins, tray, camera mast) shares the same
+     robot_description; we disable UR-vs-furniture collisions so Pilz PTP/LIN
+     planning to the pick/drop poses isn't blocked by the base on the table or
+     the tool just above it. Operator safety is the SSM loop's job (safety
+     monitor), not MoveIt collision checks. -->
 <robot xmlns:xacro="http://wiki.ros.org/xacro" name="safecollab_cell">
 
   <xacro:include filename="$(find ur_moveit_config)/srdf/ur_macro.srdf.xacro"/>

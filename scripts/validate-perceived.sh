@@ -10,8 +10,8 @@
 # closes, by comparing the PERCEIVED human pose against the GROUND-TRUTH pose
 # the simulator publishes (world->human_gt).
 #
-# See docs/VALIDATE.md for the full walkthrough, prerequisites (Arch / Omarchy),
-# GUI mode, and troubleshooting. Running this script touches Docker only — it
+# See the "Validating the perceived path live" section of README.md for the
+# walkthrough and the four checks. Running this script touches Docker only — it
 # never touches git and never pushes anything.
 #
 # Usage:
@@ -302,6 +302,6 @@ if [ "${FAIL}" -eq 0 ]; then
     printf '\033[32mPERCEIVED PATH VALIDATED — camera -> perception -> SSM loop closes live.\033[0m\n'
     exit 0
 else
-    printf '\033[31mPERCEIVED PATH NOT VALIDATED — see failures above and docs/VALIDATE.md.\033[0m\n'
+    printf '\033[31mPERCEIVED PATH NOT VALIDATED — see failures above and README.md.\033[0m\n'
     exit 1
 fi

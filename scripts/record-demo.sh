@@ -8,7 +8,7 @@
 # transient detection-loss fail-safe (lost -> re-acquire).
 #
 # Everything runs in the `safecollab:dev` Docker image with X11 passthrough
-# (same approach as docs/VALIDATE.md §5), so it works on Arch / Omarchy under
+# (same X11 approach as README.md's validation section), so it works under
 # Hyprland (XWayland). It never touches git and never pushes anything.
 #
 # LAYOUT once it is up:

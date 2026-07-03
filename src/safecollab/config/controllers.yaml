@@ -1,13 +1,9 @@
-# controllers.yaml - SafeCollab ros2_control configuration (Stream A).
-# Loaded by gz_ros2_control::GazeboSimROS2ControlPlugin (see cell.xacro) which
-# starts an in-process controller_manager. Mirrors the SR26_08 pattern:
-#   joint_state_broadcaster  -> publishes /joint_states
-#   arm_controller           -> joint_trajectory_controller on the 6 arm joints
-#
-# Exit-gate check:
-#   ros2 control list_controllers
-#     joint_state_broadcaster [joint_state_broadcaster/JointStateBroadcaster] active
-#     arm_controller          [joint_trajectory_controller/JointTrajectoryController] active
+# ros2_control configuration (Stream A). Loaded by gz_ros2_control's
+# GazeboSimROS2ControlPlugin (see cell.xacro), which starts an in-process
+# controller_manager:
+#   joint_state_broadcaster -> publishes /joint_states
+#   arm_controller          -> joint_trajectory_controller on the 6 arm joints
+# Verify with: ros2 control list_controllers (both should be active).
 
 controller_manager:
   ros__parameters:

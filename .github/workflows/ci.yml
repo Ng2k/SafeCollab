@@ -29,7 +29,7 @@ concurrency:
 
 env:
   ROS_DISTRO: jazzy
-  SAFETY_MODULE: src/safecollab/safecollab/safety_logic.py
+  SAFETY_MODULE: src/safecollab/safecollab/safety/zone.py
   CELL_LAUNCH: src/safecollab/launch/cell.launch.py
 
 jobs:
@@ -81,7 +81,7 @@ jobs:
       - name: pytest + coverage gate (>= 90% on safety & risk)
         shell: bash
         run: |
-          if [ ! -f "${SAFETY_MODULE}" ] && [ ! -f "src/safecollab/safecollab/risk.py" ]; then
+          if [ ! -f "${SAFETY_MODULE}" ] && [ ! -f "src/safecollab/safecollab/safety/risk.py" ]; then
             echo "::notice::safety/risk modules not present yet — unit+coverage"\
                  " gate is wired and will enforce >= 90% once Stream B lands."
             exit 0

@@ -1,30 +1,17 @@
 <?xml version="1.0" ?>
 <!--
-  cell.sdf — SafeCollab simulation world.
+  cell.sdf — SafeCollab simulation world: the stock gz-sim8 `empty.sdf` plus the
+  one system it lacks, the Sensors plugin.
 
-  This is the stock gz-sim8 `empty.sdf` (ground plane + sun + the standard
-  Physics / UserCommands / SceneBroadcaster / Contact systems) with ONE
-  addition that the bare empty.sdf lacks:
+  gz only renders camera/lidar/depth sensors when the Sensors system is loaded.
+  Without it the cell's overhead camera (cell.xacro) advertised camera/image but
+  produced no frames — the ros_gz_image bridge had nothing to forward,
+  /camera/image stayed silent, perception went blind, and the safety loop sat in
+  the `lost` protective stop.
 
-      <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
-
-  WHY THIS FILE EXISTS
-  --------------------
-  gz only renders camera/lidar/depth sensors when the *Sensors* system is
-  loaded in the world. The stock `empty.sdf` does NOT load it, so the cell's
-  down-looking camera (urdf/cell.xacro) was created and its gz topic
-  `camera/image` advertised, but no frames were ever produced — the
-  ros_gz_image bridge had nothing to forward, /camera/image stayed silent,
-  perception_node went blind, and the safety loop sat in the fail-safe `lost`
-  protective stop. (See docs/VALIDATE.md; this is the exact failure the
-  perceived-path validation surfaced.)
-
-  The world name is deliberately kept as "empty" so the gz transport service
-  and topic namespace (e.g. /world/empty/set_pose used by human_node, and the
-  /world/empty/* topics) is unchanged from the previous empty.sdf launch.
-
-  render_engine ogre2 is gz's default; it renders headless via EGL when gz sim
-  is started with --headless-rendering (see launch/cell.launch.py).
+  The world name stays "empty" so the /world/empty/* namespace (e.g.
+  set_pose used by human_node) is unchanged. render_engine ogre2 renders headless
+  via EGL under --headless-rendering (see launch/cell.launch.py).
 -->
 <sdf version="1.6">
   <world name="empty">

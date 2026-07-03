@@ -18,7 +18,7 @@ Python class so all tests here run without a live ROS graph.
 
 import pytest
 
-from safecollab.motion_node import MotionLogic, load_motion_config
+from safecollab.motion import MotionLogic, load_motion_config
 
 
 # ---------------------------------------------------------------------------

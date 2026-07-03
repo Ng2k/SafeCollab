@@ -19,7 +19,7 @@ import math
 import numpy as np
 import pytest
 
-from safecollab.perception_node import (
+from safecollab.perception import (
     _derive_intrinsics,
     cam_to_world_transform,
     project_pixel_to_plane,

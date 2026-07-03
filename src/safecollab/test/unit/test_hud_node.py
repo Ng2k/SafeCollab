@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from safecollab.hud_node import (
+from safecollab.hud import (
     build_colour_map,
     format_status,
     load_hud_config,

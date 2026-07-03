@@ -2,7 +2,7 @@
 
 import pytest
 
-from safecollab.safety_logic import classify
+from safecollab.safety.zone import classify
 
 # Reference thresholds for the table-driven tests (mirror the risk worked example).
 D_RED = 0.35

@@ -7,7 +7,7 @@ package_name = "safecollab"
 
 setup(
     name=package_name,
-    version="0.1.0",
+    version="0.7.0",
     packages=find_packages(exclude=["test", "test.*"]),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
@@ -39,25 +39,25 @@ setup(
         # world files -- cell.sdf must be installed so cell.launch.py can resolve
         # FindPackageShare('safecollab')/worlds/cell.sdf. cell.sdf adds the gz
         # Sensors system that the stock empty.sdf omits (without it the camera
-        # never renders); see worlds/cell.sdf header and docs/VALIDATE.md.
+        # never renders); see worlds/cell.sdf header and README.md.
         (os.path.join("share", package_name, "worlds"), glob("worlds/*.sdf")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    maintainer="Nicola",
-    maintainer_email="TODO@example.com",
+    maintainer="Nicola Guerra",
+    maintainer_email="nicola.ng2k@gmail.com",
     description="SafeCollab: a perception-driven, human-aware collaborative kitting cell "
     "implementing ISO/TS 15066 Speed-and-Separation Monitoring.",
     license="TODO",
     tests_require=["pytest", "pytest-cov"],
     entry_points={
         "console_scripts": [
-            "planner_node = safecollab.planner_node:main",
-            "human_node = safecollab.human_node:main",
-            "perception_node = safecollab.perception_node:main",
-            "safety_monitor = safecollab.safety_monitor:main",
-            "motion_node = safecollab.motion_node:main",
-            "hud_node = safecollab.hud_node:main",
+            "planner_node = safecollab.planning.node:main",
+            "human_node = safecollab.human.node:main",
+            "perception_node = safecollab.perception.node:main",
+            "safety_monitor = safecollab.safety.node:main",
+            "motion_node = safecollab.motion.node:main",
+            "hud_node = safecollab.hud.node:main",
         ],
     },
 )

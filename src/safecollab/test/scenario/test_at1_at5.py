@@ -292,7 +292,7 @@ class TestSSMScenario(unittest.TestCase):
         # asserts it LIVES end to end on /viz/safety_marker (the ROS wrapper is
         # otherwise pragma:no-cover). Colours are checked against the single
         # source of truth (_ZONE_RGBA), so a drifting second table would fail.
-        from safecollab.safety_monitor import _ZONE_RGBA  # noqa: E402
+        from safecollab.safety.marker import _ZONE_RGBA  # noqa: E402
         from visualization_msgs.msg import Marker  # noqa: E402
 
         markers = rec["markers"]

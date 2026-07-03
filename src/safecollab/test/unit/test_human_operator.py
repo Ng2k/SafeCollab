@@ -19,7 +19,7 @@ import random
 
 import pytest
 
-from safecollab.human_node import (
+from safecollab.human import (
     TRAY_CENTRE,
     TRAY_HALF_X,
     TRAY_HALF_Y,
