@@ -1,23 +1,19 @@
-# motion.yaml — SafeCollab motion_node tuning (Stream D).
-# Loaded by motion_node via load_motion_config() (paths resolved next to the
-# package, same pattern as safety_monitor/config/safety.yaml). Ground rule 5:
-# these are knobs, so they live here, not as code literals.
+# motion_node tuning (Stream D). Loaded via load_motion_config(); ground rule 5
+# keeps these knobs here, not as code literals.
 
 motion:
-  # Dead-band on /safety/scale before motion_node re-issues the arm command.
-  # safety_monitor publishes /safety/scale on a fixed 20 Hz tick EVEN WHEN THE
-  # VALUE IS UNCHANGED. Without a dead-band, motion_node would re-publish the
-  # same leg trajectory ~20x/s; the joint_trajectory_controller resets its
-  # trajectory time origin on every message, so it never finishes a leg — the
-  # arm jitters and re-aims at the leg-start pose (the "random swinging" seen in
-  # the demo). Only re-issue when the scale moves by at least this much, or on a
-  # stop/resume edge (those are always honoured regardless of the dead-band).
+  # Dead-band on /safety/scale before re-issuing the arm command. safety_monitor
+  # publishes /safety/scale at 20 Hz even when unchanged; without a dead-band
+  # motion_node would re-publish the same leg ~20x/s, and the
+  # joint_trajectory_controller resets its time origin on every message so it
+  # never finishes a leg (the arm jitters, re-aiming at the leg start). Only
+  # re-issue when the scale moves by at least this much; stop/resume edges are
+  # always honoured regardless.
   republish_scale_epsilon: 0.02
 
-  # Protective-stop hold horizon (seconds). On scale == 0 motion_node commands
-  # the CURRENT joint position over this short time so the controller actively
-  # holds. joint_trajectory_controller does NOT stop when commands go silent —
-  # it drives the active trajectory to completion — so "hold by inaction" would
-  # let the arm coast to the leg end after a RED. A small positive horizon makes
-  # the stop immediate without a zero-duration (instantaneous) goal.
+  # Protective-stop hold horizon (s). On scale == 0, command the CURRENT joint
+  # position over this short time so the controller actively holds:
+  # joint_trajectory_controller drives an active trajectory to completion when
+  # commands go silent, so "hold by inaction" would let the arm coast to the leg
+  # end. A small positive horizon stops immediately without a zero-duration goal.
   hold_time_s: 0.2

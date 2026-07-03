@@ -2,32 +2,21 @@
 <!--
   operator.sdf - camera-visible yellow operator body for the SafeCollab cell.
 
-  PURPOSE
-  The overhead camera in cell.xacro feeds perception_node, which runs an HSV
-  colour-blob detector (detect_human(), hue_low=20..hue_high=40, OpenCV 0-180
-  scale).  Yellow RGB (1.0, 1.0, 0.0) maps to HSV hue ~30 (OpenCV), squarely
-  inside that window, so the camera detects this body wherever it appears in
-  the frame.
+  PURPOSE. The overhead camera feeds perception's HSV blob detector
+  (detect_human, hue 20..40 on OpenCV's 0-180 scale). Yellow RGB (1,1,0) maps to
+  hue ~30, squarely inside that window.
 
-  MODEL PROPERTIES
-  Static (no physics). A FLAT 0.35 x 0.35 x 0.08 m yellow puck — deliberately
-  thin. The overhead camera recovers the operator's planar position by
-  back-projecting the blob centroid onto a single plane (perception_node
-  plane_z_m == human_node._MARKER_Z == 0.95 m). A tall box, viewed at the
-  camera's ~21 deg off-vertical angle, projects a silhouette whose centroid is
-  biased outward (its top face is farther from the camera nadir), corrupting
-  the recovered (x, y). A flat puck centred on the plane has almost no such
-  bias, so the perceived pose tracks the operator across the whole path. The
-  0.35 x 0.35 footprint keeps the blob well above min_area_px=100 at the wider
-  (hfov=1.5) camera. No collision geometry: purely a visual marker.
+  SHAPE. Static, no collision — a FLAT 0.35 x 0.35 x 0.08 m yellow puck.
+  Perception recovers planar position by back-projecting the blob centroid onto
+  one plane (perception plane_z_m == human _MARKER_Z == 0.95 m). A tall box,
+  seen at the camera's ~21° off-vertical angle, would project a centroid biased
+  outward (top face farther from nadir), corrupting (x, y); a flat puck barely
+  does. The 0.35 footprint keeps the blob well above min_area_px=100 at hfov=1.5.
 
-  POSE TRACKING
-  cell.launch.py spawns this model at the path start-position
-  (x=0.9, y=0.0, z=0.95).  human_node calls the gz transport service
-  /world/empty/set_pose at 10 Hz to move it in X/Y with the operator while
-  holding z at the constant marker height (_MARKER_Z).  The full 3-D
-  world-&gt;human_gt TF (incl. the reaching hand's z) is broadcast at 50 Hz
-  independently.
+  POSE TRACKING. cell.launch.py spawns this at the path start (0.9, 0.0, 0.95);
+  human_node's gz /world/empty/set_pose moves it in X/Y with the operator, held
+  at the constant marker height. The full 3-D world-&gt;human_gt TF (with the
+  reaching hand's z) is broadcast at 50 Hz independently.
 -->
 <sdf version="1.8">
   <model name="operator">
@@ -40,13 +29,9 @@
           </box>
         </geometry>
         <material>
-          <!--
-            Yellow: R=1.0 G=1.0 B=0.0 (linear sRGB).
-            OpenCV HSV (H in [0,180]): hue = 30.
-            perception_node.detect_human() window: hue_low=20, hue_high=40.
-            sat_low=100, val_low=100 - bright saturated yellow satisfies both.
-            emissive term ensures the body stays visible under dim gz lighting.
-          -->
+          <!-- Yellow RGB (1,1,0) → OpenCV hue 30, inside detect_human's 20..40
+               window (sat/val floors 100 met by bright saturated yellow). The
+               emissive term keeps the body visible under dim gz lighting. -->
           <ambient>1.0 1.0 0.0 1.0</ambient>
           <diffuse>1.0 1.0 0.0 1.0</diffuse>
           <specular>0.1 0.1 0.0 1.0</specular>

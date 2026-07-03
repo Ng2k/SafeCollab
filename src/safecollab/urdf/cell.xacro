@@ -1,14 +1,9 @@
 <?xml version="1.0"?>
-<!-- cell.xacro - SafeCollab kitting cell (Stream A), top-level description loaded
-     by robot_state_publisher (xacro Command) and spawned with ros_gz_sim create.
-     Contains:
-       * world root frame
-       * work table
-       * two feeder bins (pick locations)
-       * one shared kitting tray (drop location, co-occupied with the operator)
-       * a down-looking camera sensor publishing on /camera/image (for Stream C)
-       * the 6-DOF Universal Robots UR5e (ur_description macro) mounted on the table
-       * the gz_ros2_control::GazeboSimROS2ControlPlugin loading controllers.yaml -->
+<!-- cell.xacro - SafeCollab kitting cell (Stream A). Top-level description loaded
+     by robot_state_publisher and spawned with ros_gz_sim create. Holds: world
+     root, table, two feeder bins (pick), a shared kitting tray (drop, co-occupied
+     with the operator), a down-looking camera on /camera/image (Stream C), the
+     UR5e (ur_description macro), and the gz_ros2_control plugin. -->
 <robot name="safecollab_cell" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
   <!-- Universal Robots UR5e: real model + solved kinematics from ur_description;
@@ -45,12 +40,10 @@
   <!-- geometry constants -->
   <xacro:property name="table_h"  value="0.74"/>   <!-- table top height above floor -->
   <xacro:property name="table_sx" value="1.20"/>
-  <!-- table depth (y): widened from 0.80 so the two feeder bins sit on the
-       robot's LEFT/RIGHT flanks at a natural UR5e reach radius (~0.41 m from
-       the base) instead of tucked in behind/under the base. The old bins at
-       base-rel (-0.20, ±0.25) forced a folded back-over-the-shoulder reach —
-       the arm looked like it "stopped short" of the box. Side bins give a clean
-       elbow-up side pick and keep bin work lateral (clear of the front operator). -->
+  <!-- table depth (y): widened from 0.80 so the feeder bins sit on the robot's
+       left/right flanks at a natural UR5e reach radius (~0.41 m), giving a clean
+       elbow-up side pick clear of the front operator (rather than a folded
+       back-over-the-shoulder reach that looked like it "stopped short"). -->
   <xacro:property name="table_sy" value="1.05"/>
 
   <!-- ================= world ================= -->
@@ -75,14 +68,12 @@
   </joint>
 
   <!-- ================= feeder bins (pick) ================= -->
-  <!-- Bins flank the base FORWARD-of-centre at world (0.15, ±0.35):
-       base-rel (0.25, ±0.35), radius ≈ 0.43 m. The forward offset is key:
-       bins on the pure-side line (base-rel x ≈ 0) sit near the UR5e SHOULDER
-       SINGULARITY (wrist centre over the shoulder axis), where the +y reach
-       becomes an awkward near-singular config the arm can't cleanly complete —
-       so one bin was reachable and the mirrored one was not. Pushing the bins
-       forward moves both off that singular line into a well-conditioned
-       front-side reach. planner_node's bin targets mirror these coordinates. -->
+  <!-- Bins flank the base forward-of-centre at world (0.15, ±0.35) — base-rel
+       (0.25, ±0.35), radius ≈ 0.43 m. The forward offset is key: bins on the
+       pure-side line (base-rel x ≈ 0) sit near the UR5e shoulder singularity
+       (wrist over the shoulder axis), where one bin was reachable and its mirror
+       was not. Forward moves both into a well-conditioned front-side reach.
+       planner_node's bin targets mirror these coordinates. -->
   <xacro:box_link name="bin_left"  sx="0.15" sy="0.15" sz="0.08" mass="0.5" material="bin_mat"/>
   <joint name="top_to_bin_left" type="fixed">
     <parent link="table_top"/>
@@ -108,11 +99,11 @@
 
   <!-- ================= the arm: Universal Robots UR5e ================= -->
   <!-- Mounted on the table top toward the back. UR joint names already match
-       config/controllers.yaml, so the arm_controller + joint_state_broadcaster
-       wiring is unchanged. force_abs_paths=true so gz (and RViz) resolve the UR
-       meshes by absolute path. The gz_ros2_control PLUGIN is declared once below
-       (shared with nothing else); ur_ros2_control adds the <ros2_control> system
-       block with position/velocity/effort interfaces on the six joints. -->
+       controllers.yaml, so the arm_controller wiring is unchanged.
+       force_abs_paths=true lets gz/RViz resolve UR meshes by absolute path;
+       ur_ros2_control adds the <ros2_control> system block (position/velocity/
+       effort on the six joints), and the gz_ros2_control plugin is declared once
+       below. -->
   <xacro:property name="ur_cfg" value="$(find ur_description)/config/ur5e"/>
   <xacro:ur_robot
       name="ur5e"
@@ -128,14 +119,12 @@
   <xacro:ur_ros2_control name="ur5e" tf_prefix=""/>
 
   <!-- ================= camera sensor (Stream C) ================= -->
-  <!-- Mast rising from the table to hold the overhead camera. It is tall
-       (1.70 m) and the camera sits high (world z = 2.40) and centred on the
-       cell (y = 0) so the camera FOV covers the WHOLE operator working volume
-       (x 0.35..0.9, y ±0.65, z 0.82..1.10), not just the tray. With the older
-       low/narrow mast the standing/approach parts of the operator path fell
-       outside the frame, perception lost the operator between tray reaches, and
-       the safety loop dropped to the 'lost' fail-safe. See README.md and
-       perception_node.cam_to_world_transform (its defaults mirror this chain). -->
+  <!-- Tall mast (1.70 m) holding the overhead camera high (world z = 2.40) and
+       centred (y = 0) so the FOV covers the WHOLE operator working volume
+       (x 0.35..0.9, y ±0.65, z 0.82..1.10), not just the tray — a lower/narrower
+       mast let the standing/approach path fall out of frame, dropping the safety
+       loop to the 'lost' fail-safe. perception/geometry.cam_to_world_transform's
+       defaults mirror this chain. -->
   <xacro:box_link name="camera_mast" sx="0.04" sy="0.04" sz="1.70" mass="2.0" material="cam_mat"/>
   <joint name="top_to_mast" type="fixed">
     <parent link="table_top"/>
@@ -173,25 +162,22 @@
     <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
   </joint>
 
-  <!-- gz camera sensor; gz publishes the image on the gz topic 'camera/image'.
-       The ROS-side /camera/image is provided by the ros_gz_image/bridge in the
-       launch file (Stream G); the contract topic name is kept identical here. -->
+  <!-- gz camera sensor, publishing on the gz topic 'camera/image'. The ROS-side
+       /camera/image comes from the ros_gz_image bridge in the launch file
+       (Stream G); the contract topic name is kept identical. -->
   <gazebo reference="camera_link">
     <sensor name="cell_camera" type="camera">
       <always_on>1</always_on>
-      <!-- 15 Hz: ample for perception (its ≤100 ms per-frame latency budget is
-           67 ms here) and far cheaper to render than 30 Hz. In headless CI the
-           camera renders under software GL (no GPU); at 30 Hz the render load
-           dragged the sim's real-time factor low enough that the 20 Hz-sim-time
-           safety loop fell below the integration test's wall-clock liveness
-           floor. Halving the render rate restores the RTF headroom. -->
+      <!-- 15 Hz: ample for perception (67 ms/frame, within its ≤100 ms budget)
+           and far cheaper to render than 30 Hz. In headless CI (software GL, no
+           GPU) 30 Hz dragged the real-time factor low enough that the 20 Hz
+           safety loop fell below the integration test's wall-clock floor. -->
       <update_rate>15</update_rate>
       <visualize>true</visualize>
       <topic>camera/image</topic>
       <camera>
-        <!-- 1.5 rad (~86 deg): wide enough that the raised overhead camera
-             sees the entire operator working volume (see top_to_mast comment).
-             perception_node._CAM_HFOV mirrors this value. -->
+        <!-- 1.5 rad (~86°): wide enough to see the whole working volume (see the
+             mast comment). perception/geometry._CAM_HFOV mirrors this value. -->
         <horizontal_fov>1.5</horizontal_fov>
         <image>
           <width>640</width>
@@ -207,7 +193,7 @@
     </sensor>
   </gazebo>
 
-  <!-- ================= gz_ros2_control plugin (SR26_08 pattern) ================= -->
+  <!-- ================= gz_ros2_control plugin ================= -->
   <gazebo>
     <plugin filename="gz_ros2_control-system"
             name="gz_ros2_control::GazeboSimROS2ControlPlugin">
