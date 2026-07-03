@@ -1,6 +1,19 @@
+# syntax=docker/dockerfile:1
 # SafeCollab — perception-driven, human-aware collaborative kitting cell.
 # Base image and dependency set are fixed by AGENTS.md §8.
 FROM ros:jazzy-ros-base
+
+# Let apt keep downloaded .debs and package lists so the BuildKit cache mounts
+# on each install RUN below (target=/var/cache/apt and /var/lib/apt/lists) can
+# persist them across rebuilds. The base image ships an apt.conf.d/docker-clean
+# hook that deletes archives right after install (right for a single-shot layer,
+# wrong when we cache them); removing it plus Keep-Downloaded-Packages means a
+# rebuild that re-runs an apt layer unpacks from the local cache instead of
+# re-fetching ~2.8 GB — the dominant cost of a cold build. The cache mounts live
+# outside the image, so this changes build speed only, not the image itself.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+        > /etc/apt/apt.conf.d/keep-cache
 
 # Package documentation is pruned in the SAME RUN as each apt install below
 # (see the trailing `rm -rf /usr/share/{doc,man,info}`). This must be in-layer:
@@ -39,14 +52,18 @@ FROM ros:jazzy-ros-base
 # OSRF repo here so the package install below can pull the matching Python debs
 # (13.5.0 / 10.x — same versions as the vendored libs, so dpkg reports 0 removals
 # and no file conflicts).
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && curl -sSL https://packages.osrfoundation.org/gazebo.gpg \
         -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(. /etc/os-release && echo $VERSION_CODENAME) main" \
         > /etc/apt/sources.list.d/gazebo-stable.list \
-    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+    && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ros-gz-sim \
         ros-jazzy-ros-gz-image \
         ros-jazzy-ros-gz-bridge \
@@ -64,7 +81,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pytest-cov \
         python3-gz-transport13 \
         python3-gz-msgs10 \
-    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+    && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
 # ---------------------------------------------------------------------------
 # Universal Robots UR5e model + gz simulation wiring (real manipulator, replaces
@@ -75,10 +92,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # config/controllers.yaml and the motion pipeline, so the SSM loop is unchanged.
 # (MoveIt planning packages are added in a later layer.)
 # ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ur-description \
         ros-jazzy-ur-simulation-gz \
-    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+    && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
 # ---------------------------------------------------------------------------
 # MoveIt 2 + the deterministic Pilz industrial motion planner + moveit_py, plus
@@ -87,12 +106,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # motion_node then retimes for SSM speed scaling. Kept in a separate layer (large)
 # so the UR layer above stays cached across rebuilds.
 # ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-moveit \
         ros-jazzy-moveit-py \
         ros-jazzy-pilz-industrial-motion-planner \
         ros-jazzy-ur-moveit-config \
-    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+    && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 # python3-gz-transport13 / python3-gz-msgs10 (from the OSRF repo added above)
 # give human_node._set_gz_pose() the gz.transport13 / gz.msgs10 modules it needs
 # to move the yellow operator body via /world/empty/set_pose, so the overhead
