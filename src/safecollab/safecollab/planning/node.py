@@ -27,6 +27,8 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
     from moveit.planning import MoveItPy, PlanRequestParameters
     from moveit.core.robot_state import RobotState
 
+    from safecollab._ros_runtime import is_benign_shutdown_error
+
     _PLAN_GROUP = "ur_manipulator"
     _EEF_LINK = "tool0"
     _PLAN_FRAME = "world"
@@ -202,6 +204,14 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
             i += 1
     except KeyboardInterrupt:
         pass
+    except RuntimeError as exc:
+        # Same benign SIGINT teardown race spin_and_shutdown handles: a mid-take
+        # spin_once in wait_until_reached can raise the pybind "convert call
+        # argument" RuntimeError as the signal handler shuts the context down.
+        # Swallow only that one so we still reach os._exit(0); anything else is a
+        # real crash and propagates (the integration exit-code check catches it).
+        if rclpy.ok() and not is_benign_shutdown_error(exc):
+            raise
     finally:
         pub.destroy_node()
         if rclpy.ok():

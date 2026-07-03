@@ -53,12 +53,39 @@ def best_effort_qos(depth: int = 10) -> QoSProfile:
 
 
 def config_path(name: str) -> Path:
-    """Absolute path to ``config/<name>`` beside the installed package.
+    """Absolute path to ``config/<name>``, whatever the package layout.
 
-    The colcon install layout and the local editable layout both place
-    ``config/`` next to the ``safecollab/`` package dir (ground rule 5).
+    Two layouts ship ``config/``: the source / editable / ``--symlink-install``
+    tree places it beside the ``safecollab/`` package dir (ground rule 5), while a
+    plain ``colcon build`` installs it (per setup.py ``data_files``) to
+    ``share/safecollab/config``. Check the beside-the-package path first, then the
+    installed share dir; fall back to the source path so a genuine miss still
+    points at the expected location.
     """
-    return Path(__file__).resolve().parent.parent / "config" / name
+    beside = Path(__file__).resolve().parent.parent / "config" / name
+    if beside.exists():
+        return beside
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        shared = Path(get_package_share_directory("safecollab")) / "config" / name
+        if shared.exists():
+            return shared
+    except Exception:
+        pass
+    return beside
+
+
+def is_benign_shutdown_error(exc: BaseException) -> bool:
+    """True for the one known-benign SIGINT teardown race.
+
+    rclpy's executor can raise a pybind ``"Unable to convert call argument"``
+    ``RuntimeError`` from ``take_message`` when the signal handler shuts the
+    context down mid-take. Nodes that spin their own loop (e.g. planner_node)
+    reuse this so that race exits 0, not 1 — the discriminator lives here so it
+    stays in sync with :func:`spin_and_shutdown`.
+    """
+    return isinstance(exc, RuntimeError) and "convert call argument" in str(exc)
 
 
 def spin_and_shutdown(node, on_shutdown: Optional[Callable[[], None]] = None) -> None:
@@ -81,7 +108,7 @@ def spin_and_shutdown(node, on_shutdown: Optional[Callable[[], None]] = None) ->
     except KeyboardInterrupt:
         pass
     except RuntimeError as exc:
-        if rclpy.ok() and "convert call argument" not in str(exc):
+        if rclpy.ok() and not is_benign_shutdown_error(exc):
             raise
     finally:
         if on_shutdown is not None:
