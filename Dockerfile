@@ -2,6 +2,16 @@
 # Base image and dependency set are fixed by AGENTS.md §8.
 FROM ros:jazzy-ros-base
 
+# Package documentation is pruned in the SAME RUN as each apt install below
+# (see the trailing `rm -rf /usr/share/{doc,man,info}`). This must be in-layer:
+# the ROS/gz/MoveIt debs ship ~156 MB of docs — 152 MB of it duplicated package
+# `copyright` files (boost alone bundles its whole 2.1 MB licence set in every
+# one of its 20+ packages). The base image's dpkg excludes re-includes copyright
+# and out-sorts any config we add, so a config-based exclude doesn't win; and a
+# post-hoc `rm` in a later RUN only writes a union-fs whiteout, leaving the bytes
+# in the earlier layer. Deleting inside the install RUN is what actually shrinks
+# the image. (Source packages / apt retain the full licences.)
+
 # ---------------------------------------------------------------------------
 # System & ROS dependencies (AGENTS.md §8)
 #   - ros-gz-sim ..................... Gazebo (gz) simulation
@@ -34,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
         -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(. /etc/os-release && echo $VERSION_CODENAME) main" \
         > /etc/apt/sources.list.d/gazebo-stable.list \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ros-gz-sim \
@@ -54,7 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pytest-cov \
         python3-gz-transport13 \
         python3-gz-msgs10 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
 # ---------------------------------------------------------------------------
 # Universal Robots UR5e model + gz simulation wiring (real manipulator, replaces
@@ -68,7 +78,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ur-description \
         ros-jazzy-ur-simulation-gz \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
 # ---------------------------------------------------------------------------
 # MoveIt 2 + the deterministic Pilz industrial motion planner + moveit_py, plus
@@ -82,7 +92,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-moveit-py \
         ros-jazzy-pilz-industrial-motion-planner \
         ros-jazzy-ur-moveit-config \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 # python3-gz-transport13 / python3-gz-msgs10 (from the OSRF repo added above)
 # give human_node._set_gz_pose() the gz.transport13 / gz.msgs10 modules it needs
 # to move the yellow operator body via /world/empty/set_pose, so the overhead

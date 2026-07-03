@@ -1,0 +1,36 @@
+# Docker build-context excludes. The Dockerfile does `COPY . ${ROS_WS}/`, so
+# anything left here is both streamed to the daemon AND baked into the image
+# layer. Keep only what the image needs to build the colcon overlay and run the
+# in-image tests (src/, entrypoint.sh, requirements.txt). Everything below is
+# host-only dev cruft — excluding it removed ~314 MB from the image (the COPY
+# layer went from 316 MB to ~2 MB) and shrinks the context transfer on rebuild.
+
+# Local Python virtualenv (~291 MB) — the image uses apt/system Python, never .venv.
+.venv/
+
+# Git history & tooling metadata — not needed at runtime.
+.git/
+.gitattributes
+.gitignore
+.pre-commit-config.yaml
+
+# Lint / test / coverage caches (host-side, regenerated).
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Docs & media (docs/media holds a multi-MB demo recording) — not shipped.
+docs/
+
+# colcon build artifacts, if a local build ever left them: they would clash with
+# the in-image `colcon build` and pull stale symlinks into the image.
+build/
+install/
+log/
+
+# Python bytecode / packaging artifacts.
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
