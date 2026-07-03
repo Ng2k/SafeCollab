@@ -5,16 +5,16 @@
 # ============================== builder ==============================
 # Build the colcon overlay in isolation. safecollab is a pure-Python ament
 # package, so this needs colcon (already in ros-base) but neither the gz/MoveIt
-# runtime deps nor a compiler. Its output (install/ + the tiny build/ hooks) is
-# copied into the runtime, which therefore never ships build-essential/git/colcon
-# (~80 MB). Uses --symlink-install (as the app expects — nodes resolve config/
-# relative to their module, i.e. back into src/, which the runtime also carries).
+# runtime deps nor a compiler. A plain (non-symlink) build makes install/
+# self-contained — config/ lands in share/safecollab and config_path() finds it
+# there — so only install/ crosses into the runtime, which therefore never ships
+# build-essential/git/colcon (~80 MB) nor the build tree.
 FROM ros:jazzy-ros-base AS builder
 ENV ROS_WS=/opt/safecollab_ws
 WORKDIR ${ROS_WS}
 COPY . ${ROS_WS}/
 RUN . /opt/ros/jazzy/setup.sh \
-    && colcon build --symlink-install
+    && colcon build
 
 # ============================== runtime ==============================
 # ros-core, not ros-base: it has the ROS runtime (rclpy, ros2 CLI) without the
@@ -88,14 +88,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ros-jazzy-ur-moveit-config \
     && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
-# Bring the sources (in-image tests run from ${ROS_WS}/src; the symlink overlay
-# also resolves back into it) plus the overlay (install/) and its develop hooks
-# (build/) from the builder.
+# Bring the sources (the in-image tests run from ${ROS_WS}/src) and the
+# self-contained overlay built above.
 ENV ROS_WS=/opt/safecollab_ws
 WORKDIR ${ROS_WS}
 COPY . ${ROS_WS}/
 COPY --from=builder ${ROS_WS}/install ${ROS_WS}/install
-COPY --from=builder ${ROS_WS}/build ${ROS_WS}/build
 
 # Strip any CRLF so a Windows checkout can't break the shebang.
 COPY entrypoint.sh /entrypoint.sh
