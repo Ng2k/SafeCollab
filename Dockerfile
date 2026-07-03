@@ -1,11 +1,29 @@
 # syntax=docker/dockerfile:1
 # SafeCollab kitting cell. Deps fixed by AGENTS.md §8; CI runs its
 # integration/scenario stages inside this image (single source of truth).
-FROM ros:jazzy-ros-base
+
+# ============================== builder ==============================
+# Build the colcon overlay in isolation. safecollab is a pure-Python ament
+# package, so this needs colcon (already in ros-base) but neither the gz/MoveIt
+# runtime deps nor a compiler. Its output (install/ + the tiny build/ hooks) is
+# copied into the runtime, which therefore never ships build-essential/git/colcon
+# (~80 MB). Uses --symlink-install (as the app expects — nodes resolve config/
+# relative to their module, i.e. back into src/, which the runtime also carries).
+FROM ros:jazzy-ros-base AS builder
+ENV ROS_WS=/opt/safecollab_ws
+WORKDIR ${ROS_WS}
+COPY . ${ROS_WS}/
+RUN . /opt/ros/jazzy/setup.sh \
+    && colcon build --symlink-install
+
+# ============================== runtime ==============================
+# ros-core, not ros-base: it has the ROS runtime (rclpy, ros2 CLI) without the
+# build toolchain the overlay above was already built with.
+FROM ros:jazzy-ros-core
 
 # Keep downloaded .debs so the BuildKit cache mounts below survive rebuilds (the
 # base image's docker-clean hook otherwise wipes them post-install); a rebuilt
-# apt layer then unpacks ~2.8 GB from cache instead of re-fetching.
+# apt layer then unpacks from cache instead of re-fetching.
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
         > /etc/apt/apt.conf.d/keep-cache
@@ -70,12 +88,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ros-jazzy-ur-moveit-config \
     && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
-# The repo root IS the colcon workspace (packages under ./src).
+# Bring the sources (in-image tests run from ${ROS_WS}/src; the symlink overlay
+# also resolves back into it) plus the overlay (install/) and its develop hooks
+# (build/) from the builder.
 ENV ROS_WS=/opt/safecollab_ws
 WORKDIR ${ROS_WS}
 COPY . ${ROS_WS}/
-RUN . /opt/ros/jazzy/setup.sh \
-    && colcon build --symlink-install
+COPY --from=builder ${ROS_WS}/install ${ROS_WS}/install
+COPY --from=builder ${ROS_WS}/build ${ROS_WS}/build
 
 # Strip any CRLF so a Windows checkout can't break the shebang.
 COPY entrypoint.sh /entrypoint.sh
