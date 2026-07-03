@@ -56,7 +56,7 @@ setup(
             "human_node = safecollab.human_node:main",
             "perception_node = safecollab.perception.node:main",
             "safety_monitor = safecollab.safety_monitor:main",
-            "motion_node = safecollab.motion_node:main",
+            "motion_node = safecollab.motion.node:main",
             "hud_node = safecollab.hud.node:main",
         ],
     },
