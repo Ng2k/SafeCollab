@@ -10,6 +10,7 @@ Publishes: /motion/nominal_trajectory (JointTrajectory), /task/state (String).
 from __future__ import annotations
 
 import math
+import os
 import time
 
 from safecollab.planning.plan import KittingLeg, kitting_legs
@@ -205,6 +206,13 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
         pub.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
+    # Only reached after a CLEAN shutdown (a real bring-up exception propagates out
+    # of main() before here, so the integration exit-code check still catches
+    # crashes). os._exit skips MoveItPy's C++ static-destructor teardown — the
+    # "class_loader: attempting to unload library while objects exist" path that
+    # intermittently makes the process exit 1 on slower runners.
+    os._exit(0)
 
 
 if __name__ == "__main__":  # pragma: no cover
