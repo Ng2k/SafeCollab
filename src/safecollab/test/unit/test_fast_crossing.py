@@ -19,8 +19,8 @@ the monitor rate from ``SafetyMonitorNode._TICK_HZ``.
 
 from pathlib import Path
 
-from safecollab.risk import load_config, thresholds
-from safecollab.safety_monitor import SafetyMonitorNode
+from safecollab.safety.risk import load_config, thresholds
+from safecollab.safety.node import SafetyMonitorNode
 
 RISK_YAML = Path(__file__).resolve().parents[2] / "config" / "risk.yaml"
 

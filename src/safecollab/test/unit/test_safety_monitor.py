@@ -8,7 +8,7 @@ is already tested by Stream B in test_safety.py and is NOT re-tested here):
   - ``SafetyMonitorLogic`` construction: config values stored correctly.
   - ``SafetyMonitorLogic._min_distance()``: computes Euclidean minimum over
     one or more robot frames.
-  - ``SafetyMonitorLogic._marker_params()``: correct colour per zone; position
+  - ``_marker_params()``: correct colour per zone; position
     from human_xyz or world-origin fallback when None; zone field present.
   - ``SafetyMonitorLogic.compute()``:
       * FAIL-SAFE (AT-5): ``human_xyz=None`` → ``d=None`` → ``zone="lost"``,
@@ -31,8 +31,9 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from safecollab.risk import load_config as load_risk_config
-from safecollab.safety_monitor import SafetyMonitorLogic, load_safety_config
+from safecollab.safety import SafetyMonitorLogic, load_safety_config
+from safecollab.safety.marker import _marker_params
+from safecollab.safety.risk import load_config as load_risk_config
 
 # ---------------------------------------------------------------------------
 # Paths to the real YAML files (same pattern as test_risk.py)
@@ -217,25 +218,25 @@ class TestMarkerParams:
     """_marker_params returns correctly coloured markers per zone."""
 
     def test_green_zone_is_green(self):
-        p = SafetyMonitorLogic._marker_params("green", (0.0, 0.0, 0.0), 0.15)
+        p = _marker_params("green", (0.0, 0.0, 0.0), 0.15)
         assert p["r"] == pytest.approx(0.0)
         assert p["g"] == pytest.approx(1.0)
         assert p["b"] == pytest.approx(0.0)
 
     def test_yellow_zone_is_yellow(self):
-        p = SafetyMonitorLogic._marker_params("yellow", (0.0, 0.0, 0.0), 0.15)
+        p = _marker_params("yellow", (0.0, 0.0, 0.0), 0.15)
         assert p["r"] == pytest.approx(1.0)
         assert p["g"] == pytest.approx(1.0)
         assert p["b"] == pytest.approx(0.0)
 
     def test_red_zone_is_red(self):
-        p = SafetyMonitorLogic._marker_params("red", (0.0, 0.0, 0.0), 0.15)
+        p = _marker_params("red", (0.0, 0.0, 0.0), 0.15)
         assert p["r"] == pytest.approx(1.0)
         assert p["g"] == pytest.approx(0.0)
         assert p["b"] == pytest.approx(0.0)
 
     def test_lost_zone_is_grey(self):
-        p = SafetyMonitorLogic._marker_params("lost", None, 0.15)
+        p = _marker_params("lost", None, 0.15)
         # Grey: r==g==b and all equal 0.5
         assert p["r"] == pytest.approx(0.5)
         assert p["g"] == pytest.approx(0.5)
@@ -243,37 +244,37 @@ class TestMarkerParams:
 
     def test_active_zones_have_high_alpha(self):
         for zone in ("green", "yellow", "red"):
-            p = SafetyMonitorLogic._marker_params(zone, (0.0, 0.0, 0.0), 0.15)
+            p = _marker_params(zone, (0.0, 0.0, 0.0), 0.15)
             assert p["a"] > 0.5, f"expected alpha > 0.5 for {zone}"
 
     def test_lost_zone_has_low_alpha(self):
-        p = SafetyMonitorLogic._marker_params("lost", None, 0.15)
+        p = _marker_params("lost", None, 0.15)
         assert p["a"] < 0.6
 
     def test_position_set_from_human_xyz(self):
-        p = SafetyMonitorLogic._marker_params("green", (1.5, -0.3, 0.8), 0.15)
+        p = _marker_params("green", (1.5, -0.3, 0.8), 0.15)
         assert p["x"] == pytest.approx(1.5)
         assert p["y"] == pytest.approx(-0.3)
         assert p["z"] == pytest.approx(0.8)
 
     def test_position_defaults_to_origin_when_none(self):
-        p = SafetyMonitorLogic._marker_params("lost", None, 0.15)
+        p = _marker_params("lost", None, 0.15)
         assert p["x"] == pytest.approx(0.0)
         assert p["y"] == pytest.approx(0.0)
         assert p["z"] == pytest.approx(0.0)
 
     def test_zone_field_is_correct(self):
         for zone in ("green", "yellow", "red", "lost"):
-            p = SafetyMonitorLogic._marker_params(zone, None, 0.15)
+            p = _marker_params(zone, None, 0.15)
             assert p["zone"] == zone
 
     def test_radius_field_stored(self):
-        p = SafetyMonitorLogic._marker_params("green", (0.0, 0.0, 0.0), 0.25)
+        p = _marker_params("green", (0.0, 0.0, 0.0), 0.25)
         assert p["radius"] == pytest.approx(0.25)
 
     def test_unknown_zone_falls_back_to_grey(self):
         # An unexpected zone string should not raise; grey is the safe fallback
-        p = SafetyMonitorLogic._marker_params("unknown_zone", None, 0.15)
+        p = _marker_params("unknown_zone", None, 0.15)
         assert p["r"] == pytest.approx(0.5)
         assert p["g"] == pytest.approx(0.5)
         assert p["b"] == pytest.approx(0.5)
@@ -284,32 +285,32 @@ class TestMarkerParams:
         # The floating label spells the zone in upper case for legibility
         # (RED / LOST read faster than red / lost in a 5-second glance).
         for zone in ("green", "yellow", "red", "lost"):
-            p = SafetyMonitorLogic._marker_params(zone, (0.0, 0.0, 0.0), 0.15, 0.25)
+            p = _marker_params(zone, (0.0, 0.0, 0.0), 0.15, 0.25)
             assert p["label"] == zone.upper()
 
     def test_label_floats_above_sphere_top(self):
         # Sphere centre at z=0.8, radius 0.15 -> top at 0.95; the label sits a
         # configurable gap (0.25) above the top: 0.95 + 0.25 = 1.20.
-        p = SafetyMonitorLogic._marker_params("red", (1.5, -0.3, 0.8), 0.15, 0.25)
+        p = _marker_params("red", (1.5, -0.3, 0.8), 0.15, 0.25)
         assert p["x"] == pytest.approx(1.5)
         assert p["y"] == pytest.approx(-0.3)
         assert p["label_z"] == pytest.approx(0.8 + 0.15 + 0.25)
 
     def test_label_offset_defaults_to_zero(self):
         # Backwards-compatible: the 3-arg call still works (label at sphere top).
-        p = SafetyMonitorLogic._marker_params("green", (0.0, 0.0, 0.5), 0.15)
+        p = _marker_params("green", (0.0, 0.0, 0.5), 0.15)
         assert p["label_z"] == pytest.approx(0.5 + 0.15)
 
     def test_label_present_for_all_zones(self):
         for zone in ("green", "yellow", "red", "lost"):
-            p = SafetyMonitorLogic._marker_params(zone, None, 0.15, 0.25)
+            p = _marker_params(zone, None, 0.15, 0.25)
             assert "label" in p
             assert "label_z" in p
 
     def test_label_shares_zone_colour(self):
         # The label reuses the single zone->RGBA source, so its colour matches
         # the sphere (no second, drifting colour table).
-        p = SafetyMonitorLogic._marker_params("yellow", (0.0, 0.0, 0.0), 0.15, 0.25)
+        p = _marker_params("yellow", (0.0, 0.0, 0.0), 0.15, 0.25)
         assert (p["r"], p["g"], p["b"]) == pytest.approx((1.0, 1.0, 0.0))
 
 

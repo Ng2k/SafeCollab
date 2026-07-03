@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from safecollab.risk import load_config, protective_distance, thresholds
+from safecollab.safety.risk import load_config, protective_distance, thresholds
 
 RISK_YAML = Path(__file__).resolve().parents[2] / "config" / "risk.yaml"
 
