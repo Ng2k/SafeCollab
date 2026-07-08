@@ -17,7 +17,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- **Docker image 4.07 → 3.52 GB (−13.5 %)** and much faster rebuilds, with no
+  behavioural change: a `.dockerignore` (drops `.venv/`, `.git/`, docs/media,
+  caches, build artefacts — `COPY` layer 316 MB → ~2 MB), in-layer doc pruning,
+  a **multi-stage build** (builder on `ros-base`, runtime on the leaner
+  `ros-core`), and BuildKit apt cache mounts that keep ~2.8 GB of `.debs` warm
+  across rebuilds (cached rebuild ~15 s vs. ~10 min cold). The runtime now ships
+  a **self-contained plain-build overlay** (no `--symlink-install`, no `build/`
+  tree). Trimmed the Dockerfile comments 79 → 19 lines with code byte-identical.
+- `scripts/record-demo.sh` now waits for the **arm's `world→tool0` TF** before
+  declaring the cell ready, not just `/safety/zone` — so "READY TO RECORD" means
+  the UR5e is actually on screen (a not-yet-up arm no longer reads as "missing").
+
+### Fixed
+
+- `config_path()` resolves `config/` under **both** the `--symlink-install` and
+  plain `colcon build` layouts (checks beside-the-package, then the ament share
+  dir), which is what lets the image ship the self-contained overlay.
+- The benign pybind "convert call argument" `RuntimeError` from a mid-take
+  `spin_once` on SIGINT is now recognised by a shared `is_benign_shutdown_error()`
+  predicate (reused by `spin_and_shutdown`), so `planner_node` exits 0 instead of
+  intermittently 1 on slower runners.
 
 ---
 

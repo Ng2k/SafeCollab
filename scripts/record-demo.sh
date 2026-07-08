@@ -223,20 +223,37 @@ drop --gz-gui (RViz still shows everything)."
             safety_source:="${SOURCE}" path_seed:="${SEED}" \
         >/dev/null || die "docker run failed."
 
-    # ---- 4. wait until the safety loop is publishing ------------------------
+    # ---- 4. wait until the cell is genuinely up -----------------------------
+    # Two gates, both bounded by the same deadline:
+    #   a) /safety/zone publishes            -> the safety loop is closed.
+    #   b) world->tool0 TF resolves          -> the ARM is up and renderable.
+    # Gate (b) matters because /safety/zone can publish (even 'lost') before the
+    # controllers activate and the arm's transforms exist — at which point RViz
+    # shows the zone sphere but NO robot, which reads as "the arm is missing".
+    # Waiting for the arm TF makes "READY TO RECORD" mean the arm is on screen.
     info "waiting for the cell to come up (up to ${STARTUP_TIMEOUT}s; software GL is slow) ..."
     deadline=$(( $(date +%s) + STARTUP_TIMEOUT ))
-    until docker exec "${CONTAINER}" /entrypoint.sh \
-            ros2 topic echo /safety/zone --once >/dev/null 2>&1; do
-        if ! container_running; then
-            warn "the cell container exited during start-up — last 40 log lines:"
-            docker logs --tail 40 "${CONTAINER}" 2>&1 | sed 's/^/    /' || true
-            die "cell start-up failed (see logs above)."
-        fi
-        [ "$(date +%s)" -lt "$deadline" ] || die "timed out waiting for /safety/zone."
-        sleep 2
-    done
-    ok "cell is up — Gazebo and RViz windows should be open."
+
+    # cell_ready CMD... — run a readiness probe inside the container; true if it
+    # exits 0. Dies with the container's last logs if it crashed during start-up.
+    wait_for() {
+        local what="$1"; shift
+        until docker exec "${CONTAINER}" /entrypoint.sh "$@" >/dev/null 2>&1; do
+            if ! container_running; then
+                warn "the cell container exited during start-up — last 40 log lines:"
+                docker logs --tail 40 "${CONTAINER}" 2>&1 | sed 's/^/    /' || true
+                die "cell start-up failed (see logs above)."
+            fi
+            [ "$(date +%s)" -lt "$deadline" ] || die "timed out waiting for ${what}."
+            sleep 2
+        done
+    }
+
+    wait_for "the safety loop (/safety/zone)" ros2 topic echo /safety/zone --once
+    info "safety loop up; waiting for the arm (world->tool0 TF) ..."
+    wait_for "the arm (world->tool0 TF)" \
+        bash -c 'timeout 5 ros2 run tf2_ros tf2_echo world tool0 2>/dev/null | grep -q Translation'
+    ok "cell is up — arm TF resolved; Gazebo and RViz windows should be open."
 fi
 
 # ---- 5. recording cues -------------------------------------------------------
