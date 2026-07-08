@@ -17,6 +17,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
+### Added
+
+- **`human` / `safety` launch flags** on `cell.launch.py` (both default `true`):
+  `human:=false` skips the operator body + `human_node`; `safety:=false` skips
+  `perception_node` + `safety_monitor` so `motion_node` runs every planned leg at
+  full speed. Defaults are unchanged (AT-1..AT-5 still pass).
+- **Three focused demo launchers** (`scripts/demo-{robot,ssm,failsafe}.sh`, sharing
+  `scripts/lib/demo-common.sh`): robot-only full pick-and-place; the ISO/TS 15066
+  SSM green→yellow→red cycle; and SSM with detection losses at random intervals to
+  show the LOST fail-safe. Each takes `--no-build` to reuse the existing image.
+
 ### Changed
 
 - **Docker image 4.07 → 3.52 GB (−13.5 %)** and much faster rebuilds, with no
