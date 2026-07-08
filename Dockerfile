@@ -1,42 +1,54 @@
-# SafeCollab — perception-driven, human-aware collaborative kitting cell.
-# Base image and dependency set are fixed by AGENTS.md §8.
-FROM ros:jazzy-ros-base
+# syntax=docker/dockerfile:1
+# SafeCollab kitting cell. Deps fixed by AGENTS.md §8; CI runs its
+# integration/scenario stages inside this image (single source of truth).
 
-# ---------------------------------------------------------------------------
-# System & ROS dependencies (AGENTS.md §8)
-#   - ros-gz-sim ..................... Gazebo (gz) simulation
-#   - ros-gz-image ................... gz <-> ros2 camera/image bridge (perception)
-#   - ros-gz-bridge .................. gz <-> ros2 /clock bridge (sim time)
-#   - gz-ros2-control ................ gz <-> ros2_control bridge
-#   - ros2-control / ros2-controllers  the control stack
-#   - joint-trajectory-controller .... arm controller used by motion_node
-#   - xacro .......................... expands cell.xacro for robot_state_publisher
-#   - robot-state-publisher .......... publishes robot_description / TF in cell.launch.py
-#   - python3-opencv ................. classical CV for perception_node
-#   - cv-bridge ...................... sensor_msgs/Image <-> cv2 in perception_node
-#   - python3-pytest(-cov) ........... unit test + coverage gate (>= 90%)
-#   - launch-testing(-ros) ........... headless integration bring-up harness (§7.4)
-#
-# This image is the single source of truth for the application dependency set:
-# the CI integration stage runs the headless launch_test INSIDE this image
-# (not a separately-maintained apt list), so a package present here but missing
-# in CI — or vice-versa — cannot happen.
-# ---------------------------------------------------------------------------
-# gz Harmonic Python bindings (gz.transport13 / gz.msgs10) live in the OSRF gz
-# apt repo, not the ROS one (the ROS image ships gz only as C++ vendor packages:
-# ros-jazzy-gz-{transport,msgs}-vendor — no Python module). human_node uses them
-# to move the yellow operator body via the /world/empty/set_pose service. Add the
-# OSRF repo here so the package install below can pull the matching Python debs
-# (13.5.0 / 10.x — same versions as the vendored libs, so dpkg reports 0 removals
-# and no file conflicts).
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+# ============================== builder ==============================
+# Build the colcon overlay in isolation. safecollab is a pure-Python ament
+# package, so this needs colcon (already in ros-base) but neither the gz/MoveIt
+# runtime deps nor a compiler. A plain (non-symlink) build makes install/
+# self-contained — config/ lands in share/safecollab and config_path() finds it
+# there — so only install/ crosses into the runtime, which therefore never ships
+# build-essential/git/colcon (~80 MB) nor the build tree.
+FROM ros:jazzy-ros-base AS builder
+ENV ROS_WS=/opt/safecollab_ws
+WORKDIR ${ROS_WS}
+COPY . ${ROS_WS}/
+RUN . /opt/ros/jazzy/setup.sh \
+    && colcon build
+
+# ============================== runtime ==============================
+# ros-core, not ros-base: it has the ROS runtime (rclpy, ros2 CLI) without the
+# build toolchain the overlay above was already built with.
+FROM ros:jazzy-ros-core
+
+# Keep downloaded .debs so the BuildKit cache mounts below survive rebuilds (the
+# base image's docker-clean hook otherwise wipes them post-install); a rebuilt
+# apt layer then unpacks from cache instead of re-fetching.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+        > /etc/apt/apt.conf.d/keep-cache
+
+# Every apt RUN below caches /var/cache/apt + the apt lists (outside the image)
+# and prunes doc/man/info IN-LAYER — a later `rm` only whiteouts the bytes. Docs
+# are ~156 MB, nearly all duplicated `copyright` files (boost's 2.1 MB per deb).
+
+# OSRF gz repo: the ROS image has gz only as C++ vendor packages, so the
+# gz.transport13/gz.msgs10 Python bindings human_node needs (to move the operator
+# via /world/empty/set_pose) come from here.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && curl -sSL https://packages.osrfoundation.org/gazebo.gpg \
         -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(. /etc/os-release && echo $VERSION_CODENAME) main" \
         > /etc/apt/sources.list.d/gazebo-stable.list \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# ROS/gz stack: sim, gz<->ros2 bridges, ros2_control + arm controller,
+# robot_state_publisher/xacro, perception (opencv/cv-bridge), test harnesses.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ros-gz-sim \
         ros-jazzy-ros-gz-image \
         ros-jazzy-ros-gz-bridge \
@@ -54,63 +66,39 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pytest-cov \
         python3-gz-transport13 \
         python3-gz-msgs10 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
-# ---------------------------------------------------------------------------
-# Universal Robots UR5e model + gz simulation wiring (real manipulator, replaces
-# the hand-built cylinder arm). ur_description provides the URDF/meshes and solved
-# kinematics; ur_simulation_gz wires the UR into gz via gz_ros2_control (the same
-# mechanism this cell already uses) — its ur_gz.ros2_control.xacro is included by
-# cell.xacro. Joint names (shoulder_pan_joint … wrist_3_joint) already match
-# config/controllers.yaml and the motion pipeline, so the SSM loop is unchanged.
-# (MoveIt planning packages are added in a later layer.)
-# ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# UR5e model + its gz_ros2_control wiring (ur_gz.ros2_control.xacro is included
+# by cell.xacro); UR joint names already match config/controllers.yaml.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ur-description \
         ros-jazzy-ur-simulation-gz \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
-# ---------------------------------------------------------------------------
-# MoveIt 2 + the deterministic Pilz industrial motion planner + moveit_py, plus
-# the UR MoveIt config (SRDF/kinematics/limits reused for our cell). planner_node
-# uses MoveItPy + Pilz (PTP/LIN) to generate the nominal kitting trajectory that
-# motion_node then retimes for SSM speed scaling. Kept in a separate layer (large)
-# so the UR layer above stays cached across rebuilds.
-# ---------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# MoveIt + Pilz + moveit_py + the UR MoveIt config: planner_node plans the
+# nominal kitting trajectory (PTP/LIN) that motion_node retimes for SSM scaling.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-moveit \
         ros-jazzy-moveit-py \
         ros-jazzy-pilz-industrial-motion-planner \
         ros-jazzy-ur-moveit-config \
-    && rm -rf /var/lib/apt/lists/*
-# python3-gz-transport13 / python3-gz-msgs10 (from the OSRF repo added above)
-# give human_node._set_gz_pose() the gz.transport13 / gz.msgs10 modules it needs
-# to move the yellow operator body via /world/empty/set_pose, so the overhead
-# camera sees the operator track its path and perception_node can detect it.
-# The import in human_node stays guarded (try/except) so the node still runs if
-# the bindings are ever absent — it just falls back to a static operator body.
+    && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
 
-# Colcon workspace root. The repository root *is* the workspace: packages live
-# under ./src (see AGENTS.md §5), so COPY . places them at ${ROS_WS}/src.
+# Bring the sources (the in-image tests run from ${ROS_WS}/src) and the
+# self-contained overlay built above.
 ENV ROS_WS=/opt/safecollab_ws
 WORKDIR ${ROS_WS}
-
-# Copy the whole repository into the workspace and build the overlay from
-# scratch. The repo root is the workspace, so packages already sit under
-# ./src (e.g. src/safecollab). `colcon build` exits 0 even when src/ has no
-# packages yet, so the image builds cleanly before the application streams
-# land (AGENTS.md §6, Stream G).
 COPY . ${ROS_WS}/
-RUN . /opt/ros/jazzy/setup.sh \
-    && colcon build --symlink-install
+COPY --from=builder ${ROS_WS}/install ${ROS_WS}/install
 
-# entrypoint sources /opt/ros/jazzy and the overlay, then exec's the CMD.
-# Strip any CR (the repo may be checked out on Windows with core.autocrlf=true);
-# a CRLF shebang would make the Linux loader fail with "bad interpreter".
+# Strip any CRLF so a Windows checkout can't break the shebang.
 COPY entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh \
     && chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
 
-# Default: launch the full cell headless (no GUI) — overridable at `docker run`.
 CMD ["ros2", "launch", "safecollab", "cell.launch.py", "headless:=true"]
