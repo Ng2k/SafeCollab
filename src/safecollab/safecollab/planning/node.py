@@ -76,19 +76,27 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
             return None
         return [_latest_js[name] for name in _JOINT_ORDER]
 
-    def wait_until_reached(goal: list[float], timeout_s: float) -> bool:
-        # True once every joint is within _REACH_TOL of the goal, or False on
-        # timeout (e.g. a long protective stop). Spins pub so the JS callback fires.
+    def wait_until_reached(goal: list[float], stall_timeout_s: float) -> bool:
+        # True once every joint is within _REACH_TOL of the goal. False only after
+        # stall_timeout_s with no progress toward it — the stall window resets on
+        # every step closer, so an SSM slow-down (still creeping) delays the leg
+        # rather than timing out. Spins pub so the /joint_states callback fires.
         _REACH_TOL = 0.05  # rad (~3° per joint)
-        deadline = time.time() + timeout_s
-        while rclpy.ok() and time.time() < deadline:
+        _PROGRESS_EPS = 0.01  # rad — a meaningful step closer to the goal
+        best = float("inf")
+        stall_deadline = time.time() + stall_timeout_s
+        while rclpy.ok():
             rclpy.spin_once(pub, timeout_sec=0.05)
             cur = current_joints()
-            if (
-                cur is not None
-                and max(abs(a - b) for a, b in zip(cur, goal)) < _REACH_TOL
-            ):
-                return True
+            if cur is not None:
+                dist = max(abs(a - b) for a, b in zip(cur, goal))
+                if dist < _REACH_TOL:
+                    return True
+                if dist < best - _PROGRESS_EPS:
+                    best = dist
+                    stall_deadline = time.time() + stall_timeout_s
+            if time.time() >= stall_deadline:
+                return False
         return False
 
     log.info("[planner_node] MoveItPy up; planning group ur_manipulator")
@@ -188,18 +196,20 @@ def main(args: list[str] | None = None) -> None:  # pragma: no cover
             for leg in kitting_legs("left" if i % 2 == 0 else "right"):
                 if not rclpy.ok():
                     break
-                dur, goal = plan_and_publish(leg)
-                # Closed-loop pacing: wait until the arm REACHES the leg goal, then
-                # apply the settle dwell. A LARGE timeout is free on a clear cycle and
-                # only bounds how long a BLOCKED leg waits for the operator to clear.
-                if goal is not None:
-                    reached = wait_until_reached(
-                        goal, timeout_s=max(15.0, dur * 6.0 + 10.0)
+                # Re-issue this leg until the arm actually reaches its goal, then
+                # settle. Never advance on a stall — that would drop the arm onto
+                # the next leg mid-transit (bin -> tray skip).
+                while rclpy.ok():
+                    dur, goal = plan_and_publish(leg)
+                    if goal is None:
+                        break  # IK unreachable / plan failed — cannot do this leg
+                    if wait_until_reached(
+                        goal, stall_timeout_s=max(15.0, dur * 6.0 + 10.0)
+                    ):
+                        break
+                    log.info(
+                        f"[planner_node] {leg.state}: stalled (protective stop?) — holding, re-issuing"
                     )
-                    if not reached:
-                        log.info(
-                            f"[planner_node] {leg.state}: goal not reached before timeout"
-                        )
                 time.sleep(leg.settle_s)
             i += 1
     except KeyboardInterrupt:

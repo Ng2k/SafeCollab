@@ -116,7 +116,11 @@
       force_abs_paths="true">
     <origin xyz="-0.10 0.0 0.0" rpy="0 0 0"/>
   </xacro:ur_robot>
-  <xacro:ur_ros2_control name="ur5e" tf_prefix=""/>
+  <!-- Boot in the tool-down work family (planning/node.py's IK seed, pan=0), not
+       the stock UR home which parks the tool up high pointing sideways and makes
+       the first PTP a drop-and-flip lunge instead of a short reach to the bin. -->
+  <xacro:ur_ros2_control name="ur5e" tf_prefix=""
+      initial_positions="${dict(shoulder_pan_joint=0.0,shoulder_lift_joint=-1.2,elbow_joint=1.4,wrist_1_joint=-1.6,wrist_2_joint=-1.57,wrist_3_joint=0.0)}"/>
 
   <!-- ================= camera sensor (Stream C) ================= -->
   <!-- Tall mast (1.70 m) holding the overhead camera high (world z = 2.40) and
