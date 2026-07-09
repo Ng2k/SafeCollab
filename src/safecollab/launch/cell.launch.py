@@ -144,6 +144,28 @@ def generate_launch_description():
     )
     hud = LaunchConfiguration("hud")
 
+    human_arg = DeclareLaunchArgument(
+        "human",
+        default_value="true",
+        description=(
+            "Spawn the operator body and human_node. false: robot-only cell (no "
+            "operator, no ground-truth path) — use with safety:=false to show the "
+            "full pick-and-place at full speed."
+        ),
+    )
+    human = LaunchConfiguration("human")
+
+    safety_arg = DeclareLaunchArgument(
+        "safety",
+        default_value="true",
+        description=(
+            "Run the safety loop (perception_node + safety_monitor → /safety/scale). "
+            "false: no SSM scaling, so motion_node runs every planned leg at scale "
+            "1.0 (full speed). Set false only alongside human:=false."
+        ),
+    )
+    safety = LaunchConfiguration("safety")
+
     # ------------------------------------------------------------------
     # Gazebo simulation — exactly one variant runs (If/UnlessCondition). Both use
     # -r (run immediately). headless=true -> -s server-only (CI / no display);
@@ -234,6 +256,7 @@ def generate_launch_description():
             "-z",
             "0.95",
         ],
+        condition=IfCondition(human),
     )
 
     # ------------------------------------------------------------------
@@ -306,6 +329,7 @@ def generate_launch_description():
         executable="human_node",
         output="screen",
         parameters=[{"use_sim_time": True, "path_seed": path_seed}],
+        condition=IfCondition(human),
     )
 
     # Stream D: motion_node — fuses nominal trajectory * /safety/scale via
@@ -330,6 +354,7 @@ def generate_launch_description():
         executable="perception_node",
         output="screen",
         parameters=[{"use_sim_time": True}],
+        condition=IfCondition(safety),
     )
 
     # ------------------------------------------------------------------
@@ -344,6 +369,7 @@ def generate_launch_description():
         executable="safety_monitor",
         output="screen",
         parameters=[{"use_sim_time": True, "safety_source": safety_source}],
+        condition=IfCondition(safety),
     )
 
     # P5: RViz (only when rviz:=true) — loads config/view.rviz (RobotModel +
@@ -376,6 +402,8 @@ def generate_launch_description():
             path_seed_arg,
             rviz_arg,
             hud_arg,
+            human_arg,
+            safety_arg,
             # gz sim: exactly one runs, per headless.
             gz_server,  # headless=true  -> server-only (CI / no display)
             gz_full,  # headless=false -> server + GUI (interactive)

@@ -6,6 +6,14 @@
 > rules throughout (≥ 90 % coverage on safety/risk, config-not-constants, no
 > AI-attribution trailers, the release procedure).
 
+> **Status: ✅ complete — shipped as `v0.7.0` (2026-07-02).** All seven sprints
+> below landed and the single PR (`refactor/v0.7.0`) merged. A follow-up
+> `refactor/docker` pass (image 4.07 → 3.52 GB, cached rebuilds, self-contained
+> plain-build overlay, plus the `config_path` and planner-teardown fixes) merged
+> as **PR #11**. This document is retained as the phase record; the plan below is
+> historical. **Next up:** demo & docs polish (`docs/demo-polish`), then the
+> clean-machine dry-run and `v1.0.0` submission noted under *Version note* below.
+
 ## Working agreement (this phase)
 
 - **One branch:** `refactor/v0.7.0`, **one commit per sprint** (each independently

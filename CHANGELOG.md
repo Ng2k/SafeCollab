@@ -17,7 +17,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **`human` / `safety` launch flags** on `cell.launch.py` (both default `true`):
+  `human:=false` skips the operator body + `human_node`; `safety:=false` skips
+  `perception_node` + `safety_monitor` so `motion_node` runs every planned leg at
+  full speed. Defaults are unchanged (AT-1..AT-5 still pass).
+- **Three focused demo launchers** (`scripts/demo-{robot,ssm,failsafe}.sh`, sharing
+  `scripts/demo-common.sh`): robot-only full pick-and-place; the ISO/TS 15066
+  SSM green→yellow→red cycle; and SSM with detection losses at random intervals to
+  show the LOST fail-safe. Each takes `--no-build` to reuse the existing image.
+- **Demo GIFs** (`docs/media/demo-{robot,ssm,failsafe}.gif`) wired into the README:
+  a flagship SSM clip plus one per launcher.
+
+### Changed
+
+- **Docker image 4.07 → 3.52 GB (−13.5 %)** and much faster rebuilds, with no
+  behavioural change: a `.dockerignore` (drops `.venv/`, `.git/`, docs/media,
+  caches, build artefacts — `COPY` layer 316 MB → ~2 MB), in-layer doc pruning,
+  a **multi-stage build** (builder on `ros-base`, runtime on the leaner
+  `ros-core`), and BuildKit apt cache mounts that keep ~2.8 GB of `.debs` warm
+  across rebuilds (cached rebuild ~15 s vs. ~10 min cold). The runtime now ships
+  a **self-contained plain-build overlay** (no `--symlink-install`, no `build/`
+  tree). Trimmed the Dockerfile comments 79 → 19 lines with code byte-identical.
+- `scripts/record-demo.sh` now waits for the **arm's `world→tool0` TF** before
+  declaring the cell ready, not just `/safety/zone` — so "READY TO RECORD" means
+  the UR5e is actually on screen (a not-yet-up arm no longer reads as "missing").
+
+### Fixed
+
+- **Planner no longer skips a bin under an SSM slow-down.** Leg pacing is now
+  progress-based: the wait resets while the arm keeps closing on the goal, so a
+  slowed leg is delayed, not timed out. The old fixed wall-clock budget expired
+  mid-transit through a deep-yellow zone and advanced early, sending the arm
+  straight to the tray. A leg is never left before it is reached.
+- **Arm boots in the tool-down work pose.** `cell.xacro` sets the UR5e
+  `initial_positions` to the planner's IK-seed configuration instead of the stock
+  UR home, so the first motion is a short reach to the bin rather than a
+  simultaneous drop, tool-flip, and elbow-unfold lunge.
+- `config_path()` resolves `config/` under **both** the `--symlink-install` and
+  plain `colcon build` layouts (checks beside-the-package, then the ament share
+  dir), which is what lets the image ship the self-contained overlay.
+- The benign pybind "convert call argument" `RuntimeError` from a mid-take
+  `spin_once` on SIGINT is now recognised by a shared `is_benign_shutdown_error()`
+  predicate (reused by `spin_and_shutdown`), so `planner_node` exits 0 instead of
+  intermittently 1 on slower runners.
 
 ---
 
