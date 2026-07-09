@@ -18,12 +18,24 @@ hand-tuned**.
 
 ## Demo
 
-![SafeCollab SSM demo — UR5e kitting under ISO/TS 15066 speed scaling, with a protective stop and a fail-safe re-acquire](docs/media/safecollab-demo.gif)
+The same UR5e kitting cell under three conditions — the nominal run and the two
+safety edge cases the ISO/TS 15066 loop exists to handle.
 
-One `GREEN → YELLOW → RED` protective-stop → resume cycle, then a detection-loss
-fail-safe (`LOST` → re-acquire). On screen you see the UR5e running its
-MoveIt/Pilz kitting motion in RViz, a coloured safety-zone sphere and label at the
-operator, and a one-line console HUD:
+**Nominal — full-speed pick-and-place, no operator**
+
+![UR5e running the full kitting cycle at scale 1.0 with no operator present](docs/media/demo-robot.gif)
+
+**Speed-and-separation monitoring — `GREEN → YELLOW → RED` protective stop → resume**
+
+![Operator approaches the UR5e; the safety zone escalates green→yellow→red and the arm slows then stops](docs/media/demo-ssm.gif)
+
+**Fail-safe — perception drops out → grey `LOST` → hold → re-acquire**
+
+![Perception drops out at random; the zone goes grey LOST and the arm holds until the operator is re-acquired](docs/media/demo-failsafe.gif)
+
+Across all three the UR5e runs its MoveIt/Pilz kitting motion in RViz while a
+coloured safety-zone sphere and label track the operator and a one-line console
+HUD reports the live state:
 
 ```
 SSM | RED    | speed   0% | min-dist 0.38 m
@@ -378,7 +390,7 @@ scope what runs (see below).
 | `scripts/demo-failsafe.sh` | SSM **plus detection losses at random times** → `LOST` fail-safe → recover | full cell + a background failsafe loop; foreground HUD |
 
 All three run Gazebo headless + RViz, take `--no-build` to reuse the image, and tear
-down cleanly on `Ctrl-C`.
+down cleanly on `Ctrl-C`. Each is shown in [Demo](#demo) above.
 
 ### `record-demo.sh` — the recording harness
 

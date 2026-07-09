@@ -24,9 +24,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
   `perception_node` + `safety_monitor` so `motion_node` runs every planned leg at
   full speed. Defaults are unchanged (AT-1..AT-5 still pass).
 - **Three focused demo launchers** (`scripts/demo-{robot,ssm,failsafe}.sh`, sharing
-  `scripts/lib/demo-common.sh`): robot-only full pick-and-place; the ISO/TS 15066
+  `scripts/demo-common.sh`): robot-only full pick-and-place; the ISO/TS 15066
   SSM green→yellow→red cycle; and SSM with detection losses at random intervals to
   show the LOST fail-safe. Each takes `--no-build` to reuse the existing image.
+- **Demo GIFs** (`docs/media/demo-{robot,ssm,failsafe}.gif`) wired into the README:
+  a flagship SSM clip plus one per launcher.
 
 ### Changed
 
@@ -44,6 +46,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`vMAJOR.M
 
 ### Fixed
 
+- **Planner no longer skips a bin under an SSM slow-down.** Leg pacing is now
+  progress-based: the wait resets while the arm keeps closing on the goal, so a
+  slowed leg is delayed, not timed out. The old fixed wall-clock budget expired
+  mid-transit through a deep-yellow zone and advanced early, sending the arm
+  straight to the tray. A leg is never left before it is reached.
+- **Arm boots in the tool-down work pose.** `cell.xacro` sets the UR5e
+  `initial_positions` to the planner's IK-seed configuration instead of the stock
+  UR home, so the first motion is a short reach to the bin rather than a
+  simultaneous drop, tool-flip, and elbow-unfold lunge.
 - `config_path()` resolves `config/` under **both** the `--symlink-install` and
   plain `colcon build` layouts (checks beside-the-package, then the ament share
   dir), which is what lets the image ship the self-contained overlay.
